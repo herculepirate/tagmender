@@ -560,6 +560,11 @@ def press_year(text):
         m = _press_year_re().search(content.strip())
         if m:
             return int(m.group(1) or m.group(2) or m.group(3))
+    # CTY-3: "(1984)(2015)(US)": a year in a bracket of its own after the album's year in one before
+    # it is the pressing's (the first stays the album's, YR-1)
+    years = [int(y) for y in re.findall(r"[\(\[\{]\s*(19[5-9]\d|20\d\d)\s*[\)\]\}]", str(text or ""))]
+    if len(years) >= 2 and years[1] > years[0]:
+        return years[1]
     return None
 
 
@@ -1683,6 +1688,51 @@ def demonym_countries(text) -> set:
     return {_DEMONYMS[re.sub(r"\s+", " ", m.group(1).casefold())] for m in _DEMONYM_PRESS.finditer(str(text or ""))}
 
 
+# CTY-4: a country's code in capitals right before a pressing word ("US Press", "UK Pressing",
+# "JP Issue", "(Original US Press)"): as CTY-3's adjective, never a word of a title ("Us Press")
+_CODE_PRESS = []
+
+
+def _code_press_re():
+    if not _CODE_PRESS:
+        codes = "|".join(sorted(set(_FIELD_COUNTRIES) | {"US", "USA"}, key=len, reverse=True))
+        _CODE_PRESS.append(re.compile(
+            rf"(?<![A-Za-z])({codes})\s+(?i:(?:(?:original|orig|first|1st|second|2nd|early|late)\s+)?"
+            r"(?:press(?:ing|ed)?|issue|reissue|re-?release|release|import|edition|vinyl|lp|cd))\b"))
+    return _CODE_PRESS[0]
+
+
+# CTY-4: codes that are also English words ("it", "at", "be"): only a bracket that is the code
+# alone, or the code before a word of pressing ("BE Press", "IT Pressing") - never a field
+# among others ("(Remastered, IT)") nor before a format word ("[BE Vinyl]")
+_WORD_CODES = {"IT", "AT", "BE"}
+_WORD_CODE_PRESS = re.compile(r"(?<![A-Za-z])(IT|AT|BE)\s+(?i:(?:(?:original|orig|first|1st)\s+)?"
+                              r"(?:press(?:ing|ed)?|issue|reissue|import))\b")
+
+
+def code_countries(parts) -> set:
+    """CTY-4: the countries a folder name's brackets (PARTS, each bracket's text: _bracket_parts)
+    give by their code in capitals - a bracket of its own or a comma-separated field of one
+    ("(US)", "[JP]", "(1984)(US)", "(1984, US)", "[Relapse Records, US, RR 7157-2]"), or the code
+    right before a pressing word ("US Press", "{UK Pressing 1977}"). "US" in lower or mixed case
+    is a title's word, never a country."""
+    out = set()
+    for part in parts or ():
+        whole = str(part or "").strip()
+        for f in re.split(r"[,;]", whole):
+            f = f.strip()
+            if f in ("US", "USA"):
+                out.add("US")
+            elif f in _FIELD_COUNTRIES and (f not in _WORD_CODES or f == whole):
+                out.add(_FIELD_COUNTRIES[f])
+        for m in _code_press_re().finditer(whole):
+            if m.group(1) not in _WORD_CODES:
+                out.add("US" if m.group(1) == "USA" else _FIELD_COUNTRIES.get(m.group(1), m.group(1)))
+        for m in _WORD_CODE_PRESS.finditer(whole):
+            out.add(_FIELD_COUNTRIES[m.group(1)])
+    return out
+
+
 _MADE_IN = re.compile(r"\b(?:made|printed|manufactured|pressed|produced)\s+in\s+(?:the\s+)?"
                       r"([a-z][a-z .]{1,24}?)(?=\s*(?:$|[,;:/|()=]|\.(?:\s|$)|\s{2}|\band\b|\bby\b|\d))", re.I | re.M)
 # (re.M: OCR text is many lines; "MADE IN HOLLAND" ends its line, not the text)
@@ -2458,6 +2508,8 @@ def _readable_country(code_or_name):
     name = str(code_or_name or "")
     if name in ("GB", "UK"):
         return "the UK"               # (not "England": the first long name listed for GB)
+    if name == "US":
+        return "the US"               # (not "U S A": the first long name listed for US)
     if len(name) == 2:
         name = next((n for n, c in _COUNTRY_NAMES.items() if c == name and len(n) > 3), name)
         name = name.upper() if name in ("us", "uk", "eu") else name.title()
@@ -2465,6 +2517,12 @@ def _readable_country(code_or_name):
 
 
 def _bracket_text(folder, pressing_only=False, title=""):
+    return " ".join(_bracket_parts(folder, pressing_only, title))
+
+
+def _bracket_parts(folder, pressing_only=False, title=""):
+    """Each bracket's text of a folder name, in order (pressing_only: not one about a
+    performance, nor a bracket of the release's own title, FLD-1)."""
     parts = re.findall(r"[\(\[\{]([^\)\]\}]*)[\)\]\}]", str(folder or ""))
     if pressing_only:
         # "(Live at Roadburn 2011 - Holland)" says where it was played, not where it was pressed
@@ -2474,7 +2532,7 @@ def _bracket_text(folder, pressing_only=False, title=""):
         # itself holds as a bracket: "Made in Japan (Japan)" still says Japan
         own = {fold(x).strip() for x in re.findall(r"[\(\[\{]([^\)\]\}]*)[\)\]\}]", str(title or ""))} - {""}
         parts = [p for p in parts if fold(p).strip() not in own]
-    return " ".join(parts)
+    return parts
 
 
 _PACKAGING = (("digibook", r"digi-?book"), ("mediabook", r"media-?book"),
@@ -3051,12 +3109,11 @@ def file_clues(album, cand, clues, against, cfg=None):
         named = {c for n, c in _COUNTRY_NAMES.items() if len(n) > 2 and f" {n} " in fw}
         named |= {c for n, c in (("usa", "US"), ("uk", "GB"), ("eu", "XE")) if f" {n} " in fw}
         named |= demonym_countries(folder)          # CTY-3: "{South Korean Press 1986}"
-        # "US" as a field of its own, in capitals: "[Relapse Records, US, RR 7157-2, LTD Edn]"
-        # (never the word "us" of a title)
-        if any(f.strip() == "US" for f in re.split(r"[,;]", folder)):
-            named.add("US")
-        # ... and likewise another country's code: "(2024, SACD, Sony, SICP 10151-4, JP, 2.0)"
-        named |= {_FIELD_COUNTRIES[f.strip()] for f in re.split(r"[,;]", folder) if f.strip() in _FIELD_COUNTRIES}
+        # CTY-4: a country's code in capitals as a bracket or field of its own - "(US)", "(1984)(US)",
+        # "[Relapse Records, US, RR 7157-2, LTD Edn]", "(2024, SACD, Sony, SICP 10151-4, JP, 2.0)" -
+        # or before a pressing word ("US Press"); never the word "us" of a title. Each bracket is
+        # read on its own: "(1984)(US)[LP]" joined is no field "US" (before, it was not read)
+        named |= code_countries(_bracket_parts(album.get("folder"), pressing_only=True, title=cand.get("title") or ""))
         if named and cc and cc != "XW":
             if cc in named:
                 clues.setdefault("country", f"{_readable_country(cc)} in the folder name")
@@ -4979,6 +5036,11 @@ def score_candidate(album, cand, cfg, ocr_text=""):
             titles_loose = sum(1 for t, c in zip(album["tracks"], cand["tracks"])
                                if t.get("title") and _title_or_its_start(t["title"], c.get("title")))
     conf = round(100.0 * pts / avail, 1) if avail else 0.0
+    # VIN-9: the confidence without the listed track lengths - what every record pressing of one
+    # master shares is the audio, never the lengths each entry was typed with (classify's record tie)
+    len_pts = cfg["w_durations"] * dur_frac if dur_frac is not None else 0.0
+    len_avail = cfg["w_durations"] if (dur_frac is not None or not barcode_proves({"code": code})) else 0.0
+    conf_no_lengths = round(100.0 * (pts - len_pts) / (avail - len_avail), 1) if avail > len_avail else 0.0
     # CTY-3: the year beside a press word ("Press 1986", "Re2015") orders pressings and breaks
     # ties only - no points, no hold, YR-1's original year untouched (press_year_ok)
     press = album.get("press_year") if not album.get("pressing_year") else None
@@ -4988,13 +5050,14 @@ def score_candidate(album, cand, cfg, ocr_text=""):
         if lift_by_disc_id else None
     outer = bool(code.startswith("barcode")) and barcode_on_outer(album, cand.get("barcodes"))     # BAR-3
     res = {"barcode_outer": outer,
-        "confidence": conf, "artist_sim": round(a_sim, 3), "title_sim": round(t_sim, 3), "lacks": lacks,
+        "confidence": conf, "conf_no_lengths": conf_no_lengths, "artist_sim": round(a_sim, 3), "title_sim": round(t_sim, 3), "lacks": lacks,
         "tracks_ok": tracks_ok, "aligned": aligned, "dur_frac": dur_frac, "dur_cov": round(dur_cov, 2),
         "toc_lengths": toc_lengths(album, cand, tracks_ok),
         "lengths_missing": lengths_missing, "avail": avail,
         "numbers_repeat": numbers_repeat(album), "code": code, "catno_on_copy": catno_on_copy, "year_ok": year_ok, "conflict": conflict, "notes": notes, "cand": cand,
         "copy_hint": album.get("media_hint") or "",
         "copy_kind": copy_kind(album),
+        "record_copy": record_copy(album),
         "discs_off": bool(album["discs"] and cand["disc_count"] and album["discs"] != cand["disc_count"]),
         "pressing_year": album.get("pressing_year"), "press_year": press, "press_year_ok": press_ok,
         "clues": clues, "clues_against": clues_against, "year_off": year_off,
@@ -5407,6 +5470,21 @@ def _twin_settles(res, twin, mb_result, twins, dg_result=None):
     return dict(res, best=clean)
 
 
+def _press_year_between(mb_result, dg_out, mb_best):
+    """CTY-3: neither database's pick has evidence of your copy behind it, and only one of them is
+    of the pressing's year your folder name gives ("(1984)(2015)", "Re2015"): that one, as a
+    guess (TIE-1) beside the other - ahead of the Sources preference. None otherwise."""
+    dg_best = dg_out["best"]
+    if bool(mb_best.get("press_year_ok")) == bool(dg_best.get("press_year_ok")):
+        return None
+    why = f"the {mb_best.get('press_year') or dg_best.get('press_year')} edition your folder names"
+    if mb_best.get("press_year_ok"):
+        mb_best["notes"] = mb_best["notes"] + [f"MusicBrainz chosen over Discogs's other pressing: {why} (CTY-3)"]
+        return _guessed_between(mb_result, dg_best, why)
+    return _guessed_between(_noted(dg_out, f"Discogs chosen over MusicBrainz's other pressing: {why} (CTY-3)"),
+                            mb_best, why)
+
+
 def _guessed_between(res, other, by):
     """TIE-1 (combine): RES's pick was chosen over OTHER's (the other database's sure pick) by a
     tie-break or a preference alone: RES with a copy of its pick marked tie_guess (the other
@@ -5454,7 +5532,9 @@ def _kept_choice(best, scored, cfg):
     if not _still_decides(m, scored, cfg):
         return None                  # (its own reason disproved: reassessed as any other candidate)
     if m is best:
-        return None
+        # (CHG-1: the release you chose yourself is yours, also when it is the best anyway: kept,
+        # never a tie-break's guess; TagMender's own pick that is best needs no keeping)
+        return m if m.get("own_decided") == CHOSEN_BY_YOU else None
 
     def numbered(s):
         return barcode_proves(s) or s.get("code") in ("catalogue number", "catalogue number (folder name)",
@@ -5657,6 +5737,158 @@ def cat3_own(scored):
             s["own_catno_absent"] = not catnos_agree(own, s["cand"].get("catnos") or ())
 
 
+# VIN-9: the kinds of copy whose every pressing of one master carries the same audio, so that
+# listed track lengths (typed in per entry, often off the sleeve) never tell its pressings apart
+RECORD_KINDS = ("vinyl", "cassette")
+
+
+def record_copy(album) -> str:
+    """VIN-9: "vinyl" or "cassette" when your copy is a record or tape (copy_kind: its folder name
+    or tags) and nothing says it was ripped from a CD or bought as a download: no whole CD sectors
+    or rip log's disc TOC in the audio, no CD named in the folder name too ("Album [CD+LP]", "The
+    Live LP (1990) [CD]", "(Deluxe 2CD + LP)"), no download shop named ("(Vinyl Master) [Qobuz
+    24-96]"); "" otherwise. (Lengths that are not whole CD sectors say nothing: a 16/44.1 vinyl rip
+    is not whole sectors either.)"""
+    kind = copy_kind(album)
+    if kind not in RECORD_KINDS:
+        return ""
+    audio = album.get("audio") or {}
+    folder = str(album.get("folder") or "")
+    if audio.get("cd_frames") or album.get("rip_log_toc") or _CD_HINT.search(folder) or download_store(folder):
+        return ""
+    return kind
+
+
+def record_kind(s) -> str:
+    """VIN-9: "vinyl" or "cassette" when your copy is a record or tape (record_copy) and so is
+    this scored release; "" otherwise (a CD, a download, unknown)."""
+    kind = s.get("record_copy", s.get("copy_kind")) or ""
+    return kind if kind in RECORD_KINDS and kind in set(s["cand"].get("formats") or ()) else ""
+
+
+def record_proof(s) -> str:
+    """VIN-9: what of your copy names this record pressing itself, or "": your barcode or
+    catalogue number on it (folder name, tags, scans - not one typed in notes or another
+    tagger's: WEAK_BARCODES), a matrix or runout, a label or country read on your scans, your
+    exact disc ID, the files' shop link. Never a release ID in the files' tags (another tagger's
+    lead, or TagMender's own earlier guess written in full), never its track lengths,
+    the folder name's country or format, nor the album's year: every pressing of the master
+    shares those, or the databases list too few of its pressings to tell."""
+    if s.get("code") and s["code"] not in WEAK_BARCODES and not (
+            s["code"] == "catalogue number (OCR)" and not s.get("catno_on_copy")):   # (BAR-8, as classify)
+        return s["code"]
+    if s.get("folder_catno_agrees"):
+        return "catalogue number (folder name)"
+    clues = s.get("clues") or {}
+    if clues.get("disc TOC") == EXACT_TOC_CLUE and s["cand"].get("source") != "discogs":
+        return "disc ID"
+    for k in ("source link", "matrix", "barcode", "catalogue number"):
+        if k in clues:
+            return k
+    for k in ("label", "country"):
+        if ON_THE_SCANS in str(clues.get(k) or ""):
+            return k
+    # (never a release ID in your files' tags: another tagger's is a lead, TAG-2, and TagMender's own
+    # may be its earlier guess - only TAG-1's kept choice, checked by the caller, keeps it)
+    return ""
+
+
+def _record_tied(best, ranked, cfg) -> list:
+    """VIN-9: the record pressings of BEST's album (RANKED's, BEST's kind - vinyl or cassette -,
+    every track there, nothing more against them than against BEST) that score as BEST does once
+    the listed track lengths are left out: lengths typed in per entry tell no pressing of one
+    master from another (Rush - Grace Under Pressure: Discogs 1851295's lengths, typed off the
+    sleeve, agree; 9073857's, the US pressing's, 3 of 8) - a tie, broken as TIE-1 breaks it. []
+    when BEST is no record of your copy's kind."""
+    if not record_kind(best) or not best.get("tracks_ok") or best.get("conflict"):
+        return []
+    against = set(best.get("clues_against") or ())
+    top = best.get("conf_no_lengths", best["confidence"])
+    return [s for s in ranked if s is not best and record_kind(s) == record_kind(best)
+            and s.get("tracks_ok") and not s.get("conflict") and not s.get("other_version")
+            and not s.get("media_why") and not format_contradictions(s)
+            and set(s.get("clues_against") or ()) <= against
+            and s["artist_sim"] >= cfg["auto_min_artist"] and s["title_sim"] >= cfg["auto_min_title"]
+            and _same_album(s, best) and s["cand"].get("disc_count") == best["cand"].get("disc_count")
+            and _same_group(s, best)
+            and top - s.get("conf_no_lengths", s["confidence"]) < cfg["auto_min_margin"]]
+
+
+_FOLDER_COUNTRY_AGAINST = re.compile(r"^folder name says [A-Z/]+, this pressing is from ")
+
+
+def _note_country_pick(best, pool):
+    """CTY-4: the evidence names the folder's country as what chose the pressing ("pressing chosen
+    by the US in the folder name (not on ...)"), so TAG-1 records it with the job."""
+    country = str((best.get("clues") or {}).get("country") or "")
+    if any(str(n).startswith(f"pressing chosen by {country}") for n in best.get("notes") or ()):
+        return
+    others = [str(s["cand"].get("id")) for s in pool if s is not best
+              and any(_FOLDER_COUNTRY_AGAINST.match(str(a)) for a in s.get("clues_against") or ())]
+    best["notes"] = list(best.get("notes") or []) + [
+        f"pressing chosen by {country}" + (f" (not on {', '.join(others[:3])})" if others else "")]
+
+
+def country_guess(best, pool, cfg):
+    """CTY-4 (decided 2026-11-21): a pick that only your folder name's country chose - pressings
+    of the album that fit as well (within the margin) are left out by that country alone, and
+    nothing of your copy names the pick (record_proof) - is TIE-1's guess, for a CD or download as
+    for a record: {"by", "pick", "others"}, or None. The folder name is the uploader's word."""
+    country = str((best.get("clues") or {}).get("country") or "")
+    if not country.endswith("in the folder name") or record_proof(best):
+        return None
+    against = set(best.get("clues_against") or ())
+    others = []
+    for s in pool:
+        extra = [a for a in s.get("clues_against") or () if a not in against]
+        if (s is best or not extra or not all(_FOLDER_COUNTRY_AGAINST.match(str(a)) for a in extra)
+                or not s.get("tracks_ok") or s.get("conflict") or s.get("other_version")
+                or not _same_album(s, best) or not _same_group(s, best)
+                or best["confidence"] - s["confidence"] >= cfg["auto_min_margin"]
+                or same_pressing_listed_twice([best, s])):
+            continue
+        others.append(s)
+    if not others:
+        return None
+    _note_country_pick(best, pool)
+    return {"by": country, "pick": pressing_facts(best), "others": [pressing_facts(s) for s in others]}
+
+
+def _same_group(s, best) -> bool:
+    """One MusicBrainz release group or one Discogs master, where both entries name theirs."""
+    key = "master_id" if best["cand"].get("source") == "discogs" else "release_group"
+    a, b = str(s["cand"].get(key) or ""), str(best["cand"].get(key) or "")
+    return not (a and b) or a == b
+
+
+def record_guess(best, pool):
+    """VIN-9: TIE-1's guess for a record pick that nothing of your copy names (record_proof) and
+    that no tie-break chose (one pressing left by your folder name's country, or the only listed
+    pressing of your copy's kind): {"by", "pick", "others"} - the others being the album's other
+    record pressings scored in POOL (those your folder name's country rules out among them) - or
+    None when your copy names it. A country your folder name gives, even when it leaves exactly
+    one listed pressing, is no proof (decided 2026-11-21): the databases list a fraction of a
+    record's pressings and repressings, and the folder name is the uploader's word."""
+    if not record_kind(best) or record_proof(best):
+        return None
+    against = set(best.get("clues_against") or ())
+    # (the album's other record pressings nothing of your copy rules out - not those your
+    # folder name's country does)
+    others = [s for s in pool if s is not best and record_kind(s) == record_kind(best) and s.get("tracks_ok")
+              and not s.get("conflict") and not s.get("other_version") and _same_album(s, best)
+              and _same_group(s, best) and set(s.get("clues_against") or ()) <= against
+              and not same_pressing_listed_twice([best, s])]
+    country = str((best.get("clues") or {}).get("country") or "")
+    if country.endswith("in the folder name"):
+        _note_country_pick(best, pool)
+        by = (f"{country}; nothing of your copy names the pressing" if others else
+              f"{country}, the one listed pressing from there; nothing of your copy names it")
+    else:
+        by = ("nothing of your copy names the pressing" if others else
+              "the only listed pressing of your copy's kind; nothing of your copy names it")
+    return {"by": by, "pick": pressing_facts(best), "others": [pressing_facts(s) for s in others]}
+
+
 def classify(scored, cfg):
     """Decide auto / review / nomatch for ONE source's scored candidates.
 
@@ -5723,6 +5955,7 @@ def classify(scored, cfg):
     # automatically (a person decides; the folder's pressing still leads the list).
     tags_named = [s for s in scored if s.get("tagger_tagged") and folder_says(s)]
     tags_against = sorted({f"{s['cand']['id']} ({'; '.join(folder_says(s))})" for s in tags_named})
+    whole_pool = list(scored)                  # (VIN-9: record_guess's others, before the folder name drops any)
     if any(folder_says(s) for s in scored):
         fitting = [s for s in scored if not folder_says(s)]
         # the same album: its names agree, or its own numbers prove it ("The Mediator" in the
@@ -5832,6 +6065,19 @@ def classify(scored, cfg):
     # Pressings that score the same: what the scans show can tell them apart
     # (a label, "Made in Germany", a catalogue number printed on the back).
     tied = [s for s in ranked if best["confidence"] - s["confidence"] < cfg["auto_min_margin"]]
+    # VIN-9: record pressings of the album that differ only in the lengths their entries list tie
+    record_tie = [] if kept_choice else _record_tied(best, ranked, cfg)
+    tied += [s for s in record_tie if not any(s is t for t in tied)]
+    record_pool = [best] + record_tie            # (VIN-9: the margin below is counted among these)
+    lead_swapped = False
+    if record_tie:
+        # (the one record pressing of them carrying your barcode, else your catalogue number, leads:
+        # it scored below only on the lengths its entry lists; never a CD or download of that number)
+        lead = [s for s in record_pool if barcode_agrees(s)] or [s for s in record_pool if number_agrees(s)]
+        if len(lead) == 1 and lead[0] is not best:
+            lead_swapped = True
+            best = lead[0]
+            ranked = [best] + [s for s in ranked if s is not best]
     tied, dropped = _officials_in_tie(tied, kept_choice)
     set_aside += dropped                                   # (TIE-5: no runner-up either)
     if tied and not any(s is best for s in tied):          # (TIE-4: the bootleg pick gave way)
@@ -5931,6 +6177,14 @@ def classify(scored, cfg):
     runner = next((s for s in ranked[1:] if not s.get("unproven_media")
                    and not any(s is x for x in order_out)), None)        # (TRK-2: not one reordered)
     margin = best["confidence"] - runner["confidence"] if runner else 100.0
+    if runner is not None and not kept_choice and any(best is x for x in record_pool) and \
+            any(runner is x for x in record_pool + _record_tied(best, ranked, cfg)):
+        # VIN-9: between record pressings of one master, the margin leaves the listed lengths out
+        # (never below 0: a pressing your number made the pick may score lower without its lengths)
+        margin = max(0.0, best.get("conf_no_lengths", best["confidence"])
+                     - runner.get("conf_no_lengths", runner["confidence"]))
+    if lead_swapped:
+        margin = max(0.0, margin)    # (VIN-9: your number made the pick, whatever the runner-up scored)
     # One release fits every track exactly where the pick misses every one, and nothing
     # else decides: the lengths are that release's own, so it is the pick. Millisecond
     # lengths are no pressing proof, though: unless a number, disc ID, link or ISRC is on
@@ -6256,6 +6510,12 @@ def classify(scored, cfg):
         s.pop("tie_guess", None)
     if status == "auto" and scan_pick and scan_pick[0] is best and not kept_choice:
         guess = tie_guess(best, numbered or tied, scan_pick[1])
+        if guess:
+            best["tie_guess"] = guess
+    if status == "auto" and not kept_choice and not best.get("tie_guess"):
+        # VIN-9: a record pick nothing of your copy names is TIE-1's guess, however it was chosen
+        # (your folder name's country, its lengths, the only pressing listed)
+        guess = record_guess(best, whole_pool) or country_guess(best, whole_pool, cfg)
         if guess:
             best["tie_guess"] = guess
     best["notes"] = list(dict.fromkeys(best["notes"]))     # classified twice: each note once
@@ -7174,6 +7434,9 @@ def combine(mb_result, dg_result, countries=None, prefs=None):
             tagged = _tagged_one(mb_result, dg_result)
             if tagged:
                 return tagged
+            pressed = _press_year_between(mb_result, out, mb_best)
+            if pressed:
+                return pressed
             if prefer == "discogs":
                 # (neither pick has evidence about your copy: the preference breaks the tie,
                 # in place of a guess by date or country order)
@@ -7231,6 +7494,9 @@ def combine(mb_result, dg_result, countries=None, prefs=None):
                 tagged = _tagged_one(mb_result, dg_result)
                 if tagged:
                     return tagged
+                pressed = _press_year_between(mb_result, out, mb_best)
+                if pressed:
+                    return pressed
                 # (TIE-1 / HF-2: nothing of your copy behind either pick - the Sources preference
                 # is a preference, not evidence: Discogs's pick is proposed, MusicBrainz's beside it)
                 return _guessed_between(out, mb_best, "Sources prefers Discogs")

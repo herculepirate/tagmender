@@ -5180,19 +5180,25 @@ def _mb_hit_tracks(r):
     return r.get("track-count") if one is r else sum(m["track-count"] for m in one["media"])
 
 
-def version_priority(album, catnos=(), country="", formats=()):
+def version_priority(album, catnos=(), country="", formats=(), title="", year=None):
     """Which versions of an album to fetch first (lower is sooner): your
-    catalogue number, then the country and format your folder names."""
+    catalogue number, then the country and format your folder names, then the pressing's year
+    your folder names (CTY-3's press year: "(1984)(2015)")."""
     mine = {mc.norm_code(c) for c in album.get("catnos") or ()}
     theirs = {mc.norm_code(c) for c in catnos if c}
     folder = mc.fold(album.get("folder") or "")
     cc = mc.country_code(country)
     named = {c for n, c in mc._COUNTRY_NAMES.items() if len(n) > 2 and f" {n} " in f" {folder} "}
     # (CTY-3: "{South Korean Press}" - the brackets file_clues reads, never the title's words)
-    named |= mc.demonym_countries(mc._bracket_text(album.get("folder"), pressing_only=True))
+    # (CTY-4: "(US)" - with file_clues' own filter: never a bracket of the release's own title, FLD-1)
+    named |= mc.demonym_countries(mc._bracket_text(album.get("folder"), pressing_only=True, title=title or ""))
+    named |= mc.code_countries(mc._bracket_parts(album.get("folder"), pressing_only=True, title=title or ""))
     kinds = {mc.media_kind(f) for f in formats if f}
     want = fetch_kinds(album)
-    return (0 if mine & theirs else 1, 0 if cc and cc in named else 1, 0 if want & kinds else 1)
+    press = album.get("press_year")
+    y = re.match(r"\s*(\d{4})", str(year or ""))
+    return (0 if mine & theirs else 1, 0 if cc and cc in named else 1, 0 if want & kinds else 1,
+            0 if press and y and int(y.group(1)) == press else 1)
 
 
 def fetch_kinds(album):
@@ -5374,7 +5380,8 @@ def mb_search(http, album, cfg):
 
     def prio(r):
         return version_priority(album, catnos=[i.get("catalog-number") for i in r.get("label-info") or []],
-                                country=r.get("country"), formats=[m.get("format") for m in r.get("media") or []])
+                                country=r.get("country"), formats=[m.get("format") for m in r.get("media") or []],
+                                title=r.get("title") or "", year=r.get("date"))
     same.sort(key=prio)                                    # stable: search rank among equals
     chosen = (same or hits)[:cfg["mb_detail_fetch"] if same else 2]
     # The pressing your folder names (its catalogue number or country) is fetched
@@ -6151,7 +6158,8 @@ def discogs_search(http, album, cfg, dm):
         versions = [v for v in (data or {}).get("versions", []) if str(v.get("id")) not in have]
         def vprio(v):
             return version_priority(album, catnos=[v.get("catno") or ""], country=v.get("country"),
-                                    formats=str(v.get("format") or "").split(","))
+                                    formats=str(v.get("format") or "").split(","), title=v.get("title") or "",
+                                    year=v.get("released"))
         versions.sort(key=vprio)
         # With a barcode or catalogue number to compare, look further down the list (a
         # master can have a hundred pressings, and the list rarely shows barcodes). After
@@ -6181,7 +6189,8 @@ def discogs_search(http, album, cfg, dm):
             have = {str(c["id"]) for c in out}
             vs = sorted((v for v in (data2 or {}).get("versions", []) if str(v.get("id")) not in have),
                         key=lambda v: version_priority(album, catnos=[v.get("catno") or ""], country=v.get("country"),
-                                                       formats=str(v.get("format") or "").split(",")))
+                                                       formats=str(v.get("format") or "").split(","),
+                                                       title=v.get("title") or "", year=v.get("released")))
             for v in vs[:MASTER_VERSIONS]:
                 det = http.get_json(f"https://api.discogs.com/releases/{v['id']}", "discogs")
                 if det:

@@ -5523,7 +5523,10 @@ class Engine:
         sg = suggestion_of(guess, (out or {}).get("best") or {})
         p.guessed = dict(sg)
         n = 1 + len(sg.get("others") or [])
-        words = (f"pressing guessed ({sg.get('by')}): nothing of your copy tells these {n} pressings apart; "
+        # (VIN-9: a record pressing left alone by your folder name's country, or the only one listed)
+        told = (f"nothing of your copy tells these {n} pressings apart" if n > 1
+                else "nothing of your copy proves this pressing")
+        words = (f"pressing guessed ({sg.get('by')}): {told}; "
                  "written in full, marked Partial until your copy proves a pressing (TIE-1)")
         p.why = list(p.why) + [words]
         p.notes = list(getattr(p, "notes", None) or []) + [words]
@@ -9186,7 +9189,8 @@ def suggestion_of(guess, best) -> dict:
     by = re.sub(r";\s*nothing about your copy tells the pressings apart\s*$", "", str(guess.get("by") or ""))
     n = 1 + len(others)
     pick["by"] = by
-    pick["why"] = (f"pressing suggested ({by}), not proven: nothing of your copy tells these {n} pressings apart; confirm "
+    told = f"nothing of your copy tells these {n} pressings apart" if n > 1 else "nothing of your copy proves it"
+    pick["why"] = (f"pressing suggested ({by}), not proven: {told}; confirm "
                    "it to write its barcode, catalogue number and label (Album > Use Suggested Pressing, or "
                    f"tagmender plan PATH --release {pick.get('ref')}) (TIE-1)")
     pick["others"] = others

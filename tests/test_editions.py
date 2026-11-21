@@ -223,12 +223,13 @@ class Plans(Base):
     def test_album_tag(self):
         p = self.plan([self.t(1, "A"), self.t(2, "B")], album_editions="edition_year")
         fe = p["albums"][0]["files"][0]
-        self.assertEqual(fe["changes"]["album"], ["I [2019 Vinyl Rip]"])
-        # (from the tag, with the rip's catalogue number inside its one bracket: VIN-3; never twice)
+        # (VIN-12: the Album tag names the rip as its folder does, the catalogue number in its one
+        # bracket; the folder from the tag, never the bracket twice)
+        self.assertEqual(fe["changes"]["album"], ["I [2019 Vinyl Rip CAT 1]"])
         self.assertEqual(self.folders(p), ["Meshuggah/2004 - I [2019 Vinyl Rip CAT 1]"])
         self.assertEqual(executor.Executor(p).run()["counts"], {"done": 1})
         moved = Path(fe["dst"])
-        self.assertEqual(tagio.read(moved)["album"], ["I [2019 Vinyl Rip]"])
+        self.assertEqual(tagio.read(moved)["album"], ["I [2019 Vinyl Rip CAT 1]"])
         again = pl.build([self.proposal(source_dir=str(moved.parent), files=[str(x) for x in sorted(
             moved.parent.glob("*.flac"))], targets=[self.t(1, "A"), self.t(2, "B")])],
             self.profile(operation="move", destination=str(self.dest), sources=[{"path": str(self.dest)}],
@@ -255,7 +256,7 @@ class Plans(Base):
         # (a vinyl edition is no remaster: the mark stays)
         p = self.plan([self.t(1, "A", album=["I [Remastered]"]), self.t(2, "B", album=["I [Remastered]"])],
                       album_editions="edition_year")
-        self.assertEqual(p["albums"][0]["files"][0]["changes"]["album"], ["I [Remastered] [2019 Vinyl Rip]"])
+        self.assertEqual(p["albums"][0]["files"][0]["changes"]["album"], ["I [Remastered] [2019 Vinyl Rip CAT 1]"])
 
     def test_two_pressings_of_one_edition_still_kept_apart(self):
         a = self.plan([self.t(1, "A"), self.t(2, "B")], editions="edition_year")

@@ -143,9 +143,10 @@ class VIN3_FolderNames(VinBase):
         # (ED-2's pressing year kept - decided 2026-11-17 - then the ripper and catalogue number)
         self.assertEqual(self.folders(plan), ["1973 - Piano Man [1977 Vinyl Rip PBTHAL SRM-1-1184]",
                                               "1973 - Piano Man [1977 Vinyl Rip SRM-1-1184]"])
-        # (the Album tag keeps ED-2's edition alone: no rip details in it)
+        # (VIN-12, 2026-11-21: the Album tag names the rip as its folder does - two rips, two albums
+        # in a player; never the resolution)
         albums = {v for a in plan["albums"] for fe in a["files"] for v in (fe["changes"].get("album") or [])}
-        self.assertEqual(albums, {"Piano Man [1977 Vinyl Rip]"})
+        self.assertEqual(albums, {"Piano Man [1977 Vinyl Rip PBTHAL SRM-1-1184]", "Piano Man [1977 Vinyl Rip SRM-1-1184]"})
         for a in plan["albums"]:
             for fe in a["files"]:
                 self.assertNotIn("grouping", {k for k, v in fe["changes"].items() if v and "PBTHAL" in str(v)})

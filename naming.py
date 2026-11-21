@@ -207,6 +207,13 @@ def riptag(tags: dict) -> str:
     return " ".join(x for x in (_tag1(tags, k) for k in RIP_FIELDS) if x)
 
 
+def _own_rip_bracket(b: str) -> bool:
+    """VIN-12: B is a vinyl rip's bracket as TagMender writes it in an Album tag ("2005 Vinyl Rip
+    61422-3116-1", "1977 Vinyl Rip PBTHAL SRM-1-1184 ripped 2012", a second copy's "... 32-192")."""
+    import vinylrip
+    return bool(vinylrip._OWN_FOLDER.match(b)) and not re.search(r"(?i)\bbit\b|khz", b)
+
+
 def _rip_words(tags: dict, ed: str) -> str:
     """ED plus a vinyl rip's details: "1977 Vinyl Rip PBTHAL SRM-1-1184 ripped 2012"."""
     year = _tag1(tags, "~rip_year")
@@ -461,6 +468,26 @@ class Ctx:
             t["_vinylrip"] = [off]                         # (editions "off": a vinyl rip's own bracket)
         carried = next((e for e in (edition(t, "edition_year"), edition(t, "edition"))
                         if e and e.endswith("Vinyl Rip") and album.endswith(f" [{e}]")), "")
+        own_full = False
+        if not carried:
+            # (VIN-12: the Album tag carries a rip's whole bracket - "[2005 Vinyl Rip 61422-3116-1]",
+            # written by this run or an earlier one: the folder names it once, never "[...] [2005
+            # Vinyl Rip]" beside it nor cut by the album's word limit, whatever rip details are
+            # known now - a second copy's resolution, "32-192" or "copy 2", never in a folder)
+            m = re.search(r" \[([^\[\]]+)\]$", album)
+            for mode_ in ("edition_year", "edition") if m else ():
+                e, b_ = edition(t, mode_), m.group(1)
+                if not (e and e.endswith("Vinyl Rip") and b_ != e and b_.startswith(e + " ") and _own_rip_bracket(b_)):
+                    continue
+                album = album[:-len(m.group(0))]
+                t["album"] = [album] + list(t.get("album") or [])[1:]
+                fresh = folder_edition(t, mode_)
+                full = fresh if fresh != e and fresh.startswith(e + " ") else \
+                    re.sub(r" (?:\d+-\d+(?:\.\d)?|copy \d+)$", "", b_)
+                for var in ("_edition", "_edition_kind", "_vinylrip"):
+                    t[var] = [full]
+                own_full = True
+                break
         if carried and off:
             # (the Album tag carries ED-2's "[1977 Vinyl Rip]": the folder names it once, with the
             # rip's details inside the one bracket - in every mode, editions off too)
@@ -471,7 +498,7 @@ class Ctx:
             for var in ("_edition", "_edition_kind", "_vinylrip"):
                 t[var] = [full]
         for var, mode in (("_edition", "edition_year"), ("_edition_kind", "edition")):
-            if carried and off:
+            if (carried and off) or own_full:
                 break
             ed = folder_edition(t, mode)
             if ed and not album.endswith(f"[{ed}]"):       # (the album tag may carry it already)

@@ -2744,8 +2744,23 @@ class Planner:
             # (the file as it will be: without what the release or a script deletes)
             gone_ed = {x for x in (target.get("~remove") or [])
                        if x not in target and p.policy(x) not in ("preserve", "lock", "fill_missing")}
-            tag_ed = naming.edition({**{k: v for k, v in before.items() if k not in gone_ed}, **target, **rel_tags},
-                                    album_mode) if album_mode != "off" else ""
+            as_tagged = {**{k: v for k, v in before.items() if k not in gone_ed}, **target, **rel_tags}
+            tag_ed = naming.edition(as_tagged, album_mode) if album_mode != "off" else ""
+            if tag_ed.endswith("Vinyl Rip"):
+                # VIN-12 (decided 2026-11-21): a vinyl rip's Album tag names the rip as its folder
+                # does - "Lateralus [2005 Vinyl Rip 61422-3116-1]" -, so two rips of one pressing are
+                # two albums in a player too, never one album of two rips' audio
+                full = naming.folder_edition(as_tagged, album_mode)
+                if full.startswith(tag_ed):
+                    tag_ed = full
+                if getattr(self, "_in_place_note", None) and not as_tagged.get("~rip_plain"):
+                    # VIN-12: another copy of this release is filed (or planned) where this rip would
+                    # be named - the same title and bracket, so a player (LMS: title, release ID,
+                    # discs, artist) would make the two one album: this copy, tagged where it is,
+                    # adds its own resolution ("32-192"), "copy 2" when it has none known
+                    import vinylrip
+                    res = vinylrip.resolution_name(vinylrip.resolution_of([str(f) for f in prop.files]))
+                    tag_ed = f"{tag_ed} {res or 'copy 2'}"
             # (never on a Partial or album-only album: its edition would be read from an unproven
             # media tag)
             if identified and (not unproven or tag_ed == "HD") and tag_ed and (target.get("album") or [""])[0]:

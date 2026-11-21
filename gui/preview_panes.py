@@ -219,11 +219,19 @@ def album_discs(a) -> list:
     # CD layer's files at the album folder's root, their disc number kept (no change row) - is
     # disc n twice: its files of no number are that disc's, "Disc 01" beside "Disc 01 (SACD Stereo)"
     layered = {k[0] for k in discs if k[1] and k[0] is not None}
+    n_one = None
     if (None, "") in discs and len(layered) == 1 and not any(k[0] is not None and not k[1] for k in discs):
-        n = next(iter(layered))
+        n_one = next(iter(layered))
+        # (only when they are that one disc's tracks: each number once, each one the layer has -
+        # never a flat layout's tracks of several discs, "1-01" and "2-01" both track 1)
+        loose = [t["number"] for t in discs[(None, "")]["tracks"]]
+        layer_nos = {t["number"] for k, d_ in discs.items() if k[0] == n_one and k[1] for t in d_["tracks"]}
+        if None in loose or len(loose) != len(set(loose)) or not set(loose) <= layer_nos:
+            n_one = None
+    if n_one is not None:
         d = discs.pop((None, ""))
-        d["key"] = (n, "")
-        discs[(n, "")] = d
+        d["key"] = (n_one, "")
+        discs[(n_one, "")] = d
     out = []
     for key in sorted(discs, key=lambda k: (k[0] is None, k[0] or 0, k[1])):
         d = discs[key]

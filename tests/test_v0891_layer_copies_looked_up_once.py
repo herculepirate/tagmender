@@ -89,7 +89,7 @@ class LookedUpOnce(m.Copies):
         [row] = rows
         self.assertEqual({Path(fe["dst"]).parent.name for fe in row["files"]}, FOLDERS)
         self.assertEqual(len(row["files"]), 11)
-        self.assertTrue(any(n.startswith("one release, 3 album folders") for n in row["notes"]), row["notes"])
+        self.assertTrue(any(n.startswith("one release, 3 disc folders") for n in row["notes"]), row["notes"])
         return row
 
     def test_LKP1_DSC11_three_workers_work_the_copies_out_once(self):
@@ -370,7 +370,7 @@ class InTheApp(tg.Gui):
         rows = list(ov.model.albums)
         self.assertEqual([(x["status"], len(x["files"])) for x in rows], [("ready", 11)], ov.summary.text())
         self.assertEqual({Path(fe["dst"]).parent.name for fe in rows[0]["files"]}, FOLDERS)
-        self.assertTrue(any(n.startswith("one release, 3 album folders") for n in rows[0]["notes"]))
+        self.assertTrue(any(n.startswith("one release, 3 disc folders") for n in rows[0]["notes"]))
 
 
 def load_tests(loader, tests, pattern):

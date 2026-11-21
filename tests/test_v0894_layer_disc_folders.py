@@ -6,6 +6,7 @@
 # discs of a release of two or more discs (DSC-10's claim): a one-disc hybrid SACD's layers stayed two
 # albums - two rows, the CD layer filed with no disc number (Peter Gabriel - 1 (Car), SAPGCD 1).
 # Synthetic files, mocked providers (no network).
+import os
 import sys
 import unittest
 from pathlib import Path
@@ -92,6 +93,23 @@ class DSC17(m.Copies):
             self.assertEqual(cd["tracknumber"], st["tracknumber"])
         return p
 
+    def test_DSC17_a_release_you_choose_for_the_row_keeps_both_layers(self):
+        """Change Release on the joined row: each copy planned with your choice, as DSC-11's album
+        folders are - never the CD layer's files dropped, nor the row left with nothing."""
+        import os
+        top = self.album()
+        [p] = self.plan_of(self.eng(), top)
+        for ref in (RID, f"https://www.discogs.com/release/{DGID}"):
+            e = self.eng()
+            e.force = {os.path.realpath(p.source_dir): [{"ref": ref, "files": list(p.files)}]}
+            props = self.plan_of(e, top)
+            files = sorted(Path(f).name for q in props for f in q.files)
+            self.assertEqual(files, ["101.flac", "102.flac", "103.flac", "201.flac", "202.flac", "203.flac"],
+                             (ref, [(q.status, q.notes[:1]) for q in props]))
+            self.assertTrue(all(q.status == "identified" for q in props), (ref, [(q.status, q.notes[:1]) for q in props]))
+            if ref == RID:
+                self.check_one(props)
+
     def test_DSC17_layer_disc_folders_are_one_album_discogs_preferred(self):
         self.check_one(self.plan_of(self.eng(), self.album()))
 
@@ -170,6 +188,21 @@ class DSC17(m.Copies):
         self.assertEqual(set(bases), {top})
         imgs, _k = real(top, 15)
         self.assertIn(top / "Disc 01" / "covers" / "Back Out.jpg", [Path(x) for x in imgs])
+
+
+class DSC17_PaneLabels(unittest.TestCase):
+    def test_DSC17_a_flat_layout_of_two_discs_beside_a_layer_is_never_called_disc_01(self):
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        from gui import preview_panes as pp
+
+        def fe(src, layer=False):
+            ch = {"tracknumber": ["1"], "title": ["t"]}
+            if layer:
+                ch.update(discnumber=["1"], media=["SACD (2 channels)"])
+            return {"src": src, "dst": src, "changes": ch}
+        got = pp.album_discs({"status": "ready", "identification": {}, "files": [
+            fe("/y/A/1-01 T.flac"), fe("/y/A/2-01 B.flac"), fe("/y/A/Disc 01 (SACD Stereo)/01 T.flac", True)]})
+        self.assertEqual([d["label"] for d in got], ["Disc 01 (SACD Stereo)", "Tracks"])
 
 
 if __name__ == "__main__":

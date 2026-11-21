@@ -959,7 +959,10 @@ def _release_set_groups(eng, groups, found, metas, path) -> list:
     by_parent = {}
     for g in groups:
         dirs = {Path(f).parent for f in g.files}
-        if len(dirs) != 1 or g.discs or g.box:
+        if len(dirs) != 1 or g.discs or g.box or g.set_shape == "albums":
+            # (DSC-17: the copies of one album folder's discs and layers - "Disc 01" a hybrid
+            # SACD's CD layer, "Disc 02" its stereo layer - are DSC-11's already: joined, and a
+            # release you choose for the row planned for each copy, as album folders are)
             continue
         d = next(iter(dirs))
         if d.parent == d or not (d.parent == path or path in d.parent.parents):
@@ -2731,14 +2734,6 @@ class Engine:
             got = self._claim(folder, parts, per)
             if got is None and g.set_shape == "discs" and len(per) == len(parts):
                 got = self._set_search(folder, parts, per)
-            if got is None and g.set_shape == "discs" and any(getattr(q, "layer", "") for q in parts):
-                # DSC-17: disc folders of one album folder that are layers of one hybrid SACD ("Disc
-                # 01" its CD layer, "Disc 02" its stereo layer - a one-disc release DSC-10's claim never
-                # joins): one album of it as DSC-11 joins album folders - each folder its own medium
-                # or layer of the one release, no disc or layer taken twice - never two rows
-                layered = self._release_folders(folder, parts, per, out)
-                if layered["members"]:
-                    return layered
         finally:
             self._in_set, self._alone = was_in, was_alone
             if albums:
@@ -3797,7 +3792,7 @@ class Engine:
             f"disc {d}" + ("" if k == "disc" else f" ({k} layer)")
             for d, k in sorted(self._slots(p), key=lambda s: (int(s[0]) if s[0].isdigit() else 0, s[1])))
             for _i, part, p in members)
-        note = f"one release, {len(members)} album folders: {names} ({_release_words(lead)})"
+        note = f"one release, {len(members)} {'disc folders' if shared else 'album folders'}: {names} ({_release_words(lead)})"
         joined.notes = [note] + once("notes")
         joined.set_key = group_key(lead_part.folder, lead_part.files)
         joined.set_members = [part for _i, part, _p in members]

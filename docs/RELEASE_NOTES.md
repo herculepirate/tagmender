@@ -1,5 +1,12 @@
 # Release notes
 
+## 0.8.91
+
+**Vinyl rips**
+- A pressing's country and year in the folder name now pick it: Rush's Moving Pictures in a folder "{South Korean Press 1986}" stays the 1986 South Korean pressing, filed as "[1986 Vinyl Rip 6337 160]", not the Dutch one that shares its catalogue number. A pressing year ("Press 1986", "Re2015") only decides between pressings nothing else tells apart: a barcode, disc ID or catalogue number on your copy always comes first.
+- Your comment is kept exactly as it is, with TagMender's "Vinyl rip: …" line below it, also when it ends with a name in brackets: "Mercury - 00602547118295, Re2015, EU (omp30)" was read as a comment described "omp30" and the rip line written apart from it.
+- A ripper named in brackets at the end of such a comment (one that also carries the release's catalogue number) is named in the folder and the rip line: "[2015 Vinyl Rip omp30 00602547118295]". Format words ("dsd64", "rip2", "flac24") are never taken for a ripper.
+
 ## 0.8.90
 
 **Hybrid SACDs: every copy of a disc tagged alike**

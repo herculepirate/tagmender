@@ -245,6 +245,26 @@ def _split_performer(value: str, base: str = "performer") -> tuple[str, str]:
     return base, value
 
 
+def comment_items(path) -> tuple:
+    """VIN-4: (family, [(stored, field, text)]) - each comment value as the file stores it, byte
+    for byte, with the field and text read() makes of it: a Vorbis or APEv2 COMMENT "Mercury -
+    00602547118295, Re2015, EU (omp30)" is ("...EU (omp30)", "comment:omp30", "Mercury - ...EU").
+    Other formats: their plain comment values as read()."""
+    f = _read_only_open(path)
+    fam = family(f)
+    tags = f.tags
+    if tags is None:
+        return fam, []
+    if fam == "vorbis":
+        raw = [str(v) for v in (tags.get("comment") or ())]
+        return fam, [(v, *_split_performer(v, "comment")) for v in raw]
+    if fam == "apev2":
+        key = next((k for k in tags.keys() if k.lower() == "comment"), None)
+        raw = [str(v) for v in tags[key]] if key else []
+        return fam, [(v, *_split_ape_comment(v)) for v in raw]
+    return fam, [(str(v), "comment", str(v)) for v in read(path).get("comment") or ()]
+
+
 def _lang_desc(k: str, default="eng") -> tuple[str, str]:
     """(language, description) of "comment:desc", "lyrics:eng:desc" (Picard's parse_lang_desc_tag)."""
     _t, _c, rest = k.partition(":")
@@ -1808,9 +1828,18 @@ def _set_performers(fam, tags, credits, base="performer"):
     split = _split_ape_comment if (base, fam) == ("comment", "apev2") else (lambda v: _split_performer(v, base))
     keep = [v for v in old if (_role(split(v)[0]).lower() not in roles)]
     new = list(keep)
+    # (a value written again exactly as it was - its role or description in the same case - is the
+    # file's own text, byte for byte: "text(desc)" stays so; "Joe (Piano)" written as performer:piano
+    # is "Joe (piano)", as before)
+    pool = {}
+    for v in old:
+        pk, pv = split(v)
+        pool.setdefault((_role(pk), pv), []).append(v)
     for k, vals in credits.items():
         role = _role(k)
-        new += [f"{v} ({role})" if role else v for v in vals or []]
+        for v in vals or []:
+            same = pool.get((role, v)) if role else None
+            new.append(same.pop(0) if same else f"{v} ({role})" if role else v)
     if key in tags:
         del tags[key]
     if new:

@@ -332,6 +332,59 @@ def ripper_in_notes(text: str) -> str:
     return ""
 
 
+# VIN-8: a handle in brackets ending a comment that describes the release ("Mercury -
+# 00602547118295, Re2015, EU (omp30)"): letters and digits, a lower-case letter among them
+_SIGN_TAIL = re.compile(r"\(([A-Za-z][A-Za-z0-9_.\-]{2,23})\)\s*$")
+# (a format, size, speed or disc word with its number is no handle: "(180g)", "(2LP)", "(45rpm)", "(CD2)")
+_NOT_HANDLE = re.compile(r"^(?:\d+(?:g|gr|lp|lps|cd|cds|rpm|bit|khz|in|inch)|(?:lp|cd|cds|dr|disc|disk|side|vol|"
+                         r"pt|part|v|mp|x|h|dts|ac|aac|m4a|flac|ogg|opus)\d+(?:\.\d+)?|mp3|m4a|h264|x264|h265|x265|"
+                         r"aac\d*|dts\d*|ac3|5\.1|7\.1|2\.0)$", re.I)
+# (VIN-8: a format, codec, media, side, disc, rip or software word whole, alone or with its number
+# right after it, is no handle: "dsd64", "alac24", "fl24", "mp3v0", "rip2", "CD2b", "LP1a", "sideA2",
+# "Disc1of2", "SoX14" - "flux9", "spud1", "ripley3", "webby7", "epo1" are handles)
+_FORMAT_LEAD = re.compile(
+    r"^(?:(?:clickrepair|vinylstudio|dbpoweramp|soundforge|audacity|audition|wavpack|izotope|wavelab|ripped|foobar|ffmpeg|hires|track|vinyl|alac|wave|aiff|flac|opus|lpcm|hdcd|sacd|disc|disk|part|kbps|bits|dsd|dsf|dff|wav|aif|ape|tak|mp3|m4a|aac|ogg|pcm|dts|ac3|dvd|vol|trk|rip|web|eac|xld|sox|khz|bit|fl|wv|mp|hd|bd|cd|lp|ep|sp|pt|rx|v)(?:\d+[a-z0-9]*)?|side[a-d]?\d*[a-z0-9]*|mp3v\d*)$", re.I)
+
+
+def _code_key(x) -> str:
+    return re.sub(r"[^0-9a-z]", "", str(x or "").casefold()).lstrip("0")
+
+
+def comment_signature(comments, catno: str = "") -> str:
+    """VIN-8: the ripper a comment describing the release signs at its end in brackets -
+    "Mercury - 00602547118295, Re2015, EU (omp30)": "omp30". Only where the line before the
+    brackets carries the release's own catalogue number (catno) - a description of this pressing
+    - and the handle is a known ripper's, or a handle's shape: letters with digits, a lower-case
+    letter among them, no run of three digits (a catalogue number's), not the catalogue number
+    itself, no format, size, speed or disc word ("(180g)", "(2LP)", "(CD2)"), country, label,
+    pressing or software word. Never a word alone ("(Remastered)", "(EAC)", "(uaoa)": a group's,
+    an uploader's or a format's mark cannot be told from a ripper's), nor two different
+    handles. "" else."""
+    key = _code_key(catno)
+    if len(key) < 4:
+        return ""
+    found = []
+    for c in comments or ():
+        for ln in re.split(r"\r?\n", str(c or "")):
+            if own_line(ln):
+                continue
+            m = _SIGN_TAIL.search(ln)
+            if not m or key not in _code_key(ln[:m.start()]):
+                continue
+            w = m.group(1)
+            if w.casefold() in KNOWN_RIPPERS:
+                found.append(KNOWN_RIPPERS[w.casefold()])
+                continue
+            if not (re.search(r"[a-z]", w) and re.search(r"\d", w)) or re.search(r"\d{3}", w) or \
+                    _NOT_HANDLE.match(w) or _FORMAT_LEAD.match(w) or _RES_IN_NAME.search(w) or \
+                    _code_key(w) == key or \
+                    w.upper() in _NOT_RIPPER or w.upper() in _COUNTRY or w.casefold() in _NOT_A_NAME:
+                continue
+            found.append(w)
+    # (two different handles signing: which one ripped it cannot be told)
+    return found[0] if len({x.casefold() for x in found}) == 1 else ""
+
+
 # ---------------------------------------------------------------------------- year, equipment
 def rip_year(text: str, not_years=()) -> str:
     """The year the rip was made, when a line about the rip dates it right after its verb
@@ -519,7 +572,8 @@ def describe(folder, files, catno: str = "", notes: str | None = None, comments=
     text = notes + "\n" + said + "\n" + (parent_notes or "")
     name = folder.name if folder else ""
     mine = own_folder(name, catno)
-    who = ripper_in_name(name) or mine.get("ripper") or own.get("ripper") or ripper_in_notes(text)
+    who = ripper_in_name(name) or mine.get("ripper") or own.get("ripper") or ripper_in_notes(text) or \
+        comment_signature(comments, catno)
     cap = caps_in_name(name) if not who else ""
     if cap and _signs(cap, text):
         who = cap

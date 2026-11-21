@@ -209,7 +209,9 @@ _NOT_CATNO_WORD = re.compile(
     # a bit depth and sample rate ("ECM 24-96", "[24/192]", "16-44.1"): the audio, not a number
     r"(?:16|20|24|32)\s*[-/]\s*(?:44(?:\.1)?|48|88(?:\.2)?|96|176(?:\.4)?|192|352(?:\.8)?|384)|"
     # CAT-8: a disc marker with its number ("(CD10)", "[Disc11]", "CD-2"): the disc, never a number
-    r"(?:cd|dis[ck])-?\d{1,2})$", re.I)
+    r"(?:cd|dis[ck])-?\d{1,2}|"
+    # CTY-3: a reissue's or remaster's year in its short form ("Re2015", "RE-2015", "Rm2011")
+    r"(?:re|rm)-?(?:19|20)\d\d)$", re.I)
 # words that, followed by a number, mean something else ("Volume 5", "Live 1996")
 _NUMBER_WORDS = {"vol", "volume", "part", "pt", "no", "nr", "op", "opus", "chapter", "book",
                  "side", "live", "by", "disc", "disk", "cd", "track", "edition", "session",
@@ -414,6 +416,42 @@ def catno_hints(text, variants=False):
 _PRESSING_YEAR_RE = re.compile(
     r"(?:\b(19[5-9]\d|20\d\d)\b[^\]\)]*\b(?:rm|remaster(?:ed)?|reissue|re-?release|edition|domo)\b)"
     r"|(?:\b(?:rm|remaster(?:ed)?|reissue|re-?release|domo)\b[^\]\)]*?\b(19[5-9]\d|20\d\d)\b)", re.I)
+# CTY-3: a pressing's year right beside a press word - "Press 1986", "1986 Press", "Pressed 1986",
+# "Repress 2015" - or in the short form "Re2015" ("(1987, Re2015, EU)"); never "press" as a noun
+# ("Press Kit", "Press Conference", "Press Club", "Hot Off the Press 1999")
+_DEMONYMS = {
+    "american": "US", "british": "GB", "english": "GB", "european": "XE", "german": "DE", "west german": "DE",
+    "japanese": "JP", "canadian": "CA", "french": "FR", "dutch": "NL", "swedish": "SE", "finnish": "FI",
+    "norwegian": "NO", "danish": "DK", "italian": "IT", "spanish": "ES", "portuguese": "PT", "polish": "PL",
+    "russian": "RU", "ukrainian": "UA", "austrian": "AT", "swiss": "CH", "belgian": "BE", "greek": "GR",
+    "irish": "IE", "czech": "CZ", "hungarian": "HU", "australian": "AU", "brazilian": "BR", "mexican": "MX",
+    "argentinian": "AR", "argentine": "AR", "korean": "KR", "south korean": "KR", "taiwanese": "TW",
+    "chinese": "CN", "israeli": "IL", "turkish": "TR", "new zealand": "NZ",
+}
+_PRESS_WORD = r"(?:re-?)?press(?:ing|ings|ed)?"
+_PRESS_YEAR_RX = []
+
+
+def _press_year_re():
+    """CTY-3's pattern (built on first use: the country tables stand further down)."""
+    if not _PRESS_YEAR_RX:
+        codes = "|".join(sorted(set(_FIELD_COUNTRIES) | {"US", "USA", "UK", "EU"}, key=len, reverse=True))
+        names = "|".join(sorted(map(re.escape, set(_DEMONYMS) | {n for n in _COUNTRY_NAMES if len(n) > 2}),
+                                key=len, reverse=True))
+        country = rf"(?:(?-i:{codes})|{names})"
+        # (what may follow: the bracket's end, a separator, a country, a catalogue token with a digit)
+        after = rf"(?=\s*$|\s*[,;/|+&]|\s+[-\u2013]|\s+{country}\b|\s+\S*\d)"
+        year = r"(19[5-9]\d|20\d\d)"
+        _PRESS_YEAR_RX.append(re.compile(
+            rf"(?<!\bthe\s)\b{_PRESS_WORD}\s+{year}\b{after}"
+            # (a country's code or adjective may stand between: "1977 UK Pressing", "1986 Korean Press")
+            rf"|\b{year}\s+(?:{country}\s+)?{_PRESS_WORD}\b{after}"
+            rf"|\bre-?{year}\b", re.I))
+    return _PRESS_YEAR_RX[0]
+
+
+# (a bracket about a performance or an interview names no pressing: "(Live 1975 Press)")
+_NOT_PRESSING_BRACKET = re.compile(r"\b(?:live|recorded|session|sessions|interview|concert|broadcast)\b", re.I)
 
 
 # EDN-2: the audiophile reissue labels a folder names by their short form beside the edition's
@@ -508,6 +546,20 @@ def pressing_year(text):
         first = content.split(",")[0].strip()
         if _YEAR.fullmatch(first) and "," in content and catno_hints(f"({content})"):
             return int(first)
+    return None
+
+
+def press_year(text):
+    """CTY-3: the pressing's year a folder name's bracket gives beside a press word ("{South Korean
+    Press 1986}", "(1977 Repress)") or as "Re2015", or None. A preference only (ordering and ties:
+    score_candidate's press_year_ok), never pressing_year's rule: a folder saying "Re2015" whose
+    album is listed only in its 1987 entry is filed as before."""
+    for content in _BRACKETS_RE.findall(str(text or "")):
+        if _NOT_PRESSING_BRACKET.search(content):
+            continue
+        m = _press_year_re().search(content.strip())
+        if m:
+            return int(m.group(1) or m.group(2) or m.group(3))
     return None
 
 
@@ -1616,6 +1668,21 @@ _COUNTRY_NAMES = {
     "taiwan": "TW", "china": "CN", "hong kong": "HK", "israel": "IL", "turkey": "TR",
     "worldwide": "XW",
 }
+# CTY-3: a pressing named by its country's adjective in a folder name ("{South Korean Press
+# 1986}", "[Japanese Pressing]", "(German Edition)"): only right before a pressing word - an
+# adjective alone ("(German Version)", "Dutch Courage") names no pressing
+_DEMONYM_PRESS = re.compile(
+    r"\b(" + "|".join(sorted(map(re.escape, _DEMONYMS), key=len, reverse=True)) + r")\s+"
+    r"(?:(?:original|orig|first|1st|second|2nd|early|late|first-press)\s+)?"
+    r"(?:press(?:ing|ed)?|issue|reissue|re-?release|release|import|edition|vinyl|lp|cd)\b", re.I)
+
+
+def demonym_countries(text) -> set:
+    """CTY-3: the countries a folder name's brackets name by their adjective before a pressing
+    word ("South Korean Press 1986" -> {"KR"})."""
+    return {_DEMONYMS[re.sub(r"\s+", " ", m.group(1).casefold())] for m in _DEMONYM_PRESS.finditer(str(text or ""))}
+
+
 _MADE_IN = re.compile(r"\b(?:made|printed|manufactured|pressed|produced)\s+in\s+(?:the\s+)?"
                       r"([a-z][a-z .]{1,24}?)(?=\s*(?:$|[,;:/|()=]|\.(?:\s|$)|\s{2}|\band\b|\bby\b|\d))", re.I | re.M)
 # (re.M: OCR text is many lines; "MADE IN HOLLAND" ends its line, not the text)
@@ -2983,6 +3050,7 @@ def file_clues(album, cand, clues, against, cfg=None):
                 break
         named = {c for n, c in _COUNTRY_NAMES.items() if len(n) > 2 and f" {n} " in fw}
         named |= {c for n, c in (("usa", "US"), ("uk", "GB"), ("eu", "XE")) if f" {n} " in fw}
+        named |= demonym_countries(folder)          # CTY-3: "{South Korean Press 1986}"
         # "US" as a field of its own, in capitals: "[Relapse Records, US, RR 7157-2, LTD Edn]"
         # (never the word "us" of a title)
         if any(f.strip() == "US" for f in re.split(r"[,;]", folder)):
@@ -3763,6 +3831,12 @@ def _choose_pressing(tied, preferred_countries=None, prefs=None):
         # tagged with the GB pressing, tied with the US one)
         # (and no other pressing outweighs it)
         fair = [(w, s) for w, _t, s in scored if not s.get("clues_against")]
+        # CTY-3: the year beside a press word ("Repress 2016") decides last, among the pressings
+        # every clue of yours weighs alike only - never over a barcode, disc ID or number
+        top_fair = [s for w, s in fair if w == max(x for x, _s in fair)] if fair else []
+        pressed = [s for s in top_fair if s.get("press_year") and s.get("press_year_ok")]
+        if len(pressed) == 1 and len(top_fair) > 1:
+            return pressed[0], {"date": f"the {pressed[0]['press_year']} edition your folder names"}
         # (TagMender's own tags only: another tagger's IDs are its guess, not proof)
         mine = [s for w, s in fair if s.get("tagged") and not s.get("tagger_tagged")
                 and w == max(x for x, _s in fair)]
@@ -4905,6 +4979,10 @@ def score_candidate(album, cand, cfg, ocr_text=""):
             titles_loose = sum(1 for t, c in zip(album["tracks"], cand["tracks"])
                                if t.get("title") and _title_or_its_start(t["title"], c.get("title")))
     conf = round(100.0 * pts / avail, 1) if avail else 0.0
+    # CTY-3: the year beside a press word ("Press 1986", "Re2015") orders pressings and breaks
+    # ties only - no points, no hold, YR-1's original year untouched (press_year_ok)
+    press = album.get("press_year") if not album.get("pressing_year") else None
+    press_ok = bool(press and cand["year"] and abs(press - cand["year"]) <= cfg.get("pressing_year_tolerance", 0))
     # (the confidence without the tags' barcode against it: tagger_lift)
     lifted_conf = (round(100.0 * pts / (avail - cfg["w_code"]), 1) if avail > cfg["w_code"] else 0.0) \
         if lift_by_disc_id else None
@@ -4918,7 +4996,7 @@ def score_candidate(album, cand, cfg, ocr_text=""):
         "copy_hint": album.get("media_hint") or "",
         "copy_kind": copy_kind(album),
         "discs_off": bool(album["discs"] and cand["disc_count"] and album["discs"] != cand["disc_count"]),
-        "pressing_year": album.get("pressing_year"),
+        "pressing_year": album.get("pressing_year"), "press_year": press, "press_year_ok": press_ok,
         "clues": clues, "clues_against": clues_against, "year_off": year_off,
         "matrix_words_seen": matrix_words_seen(album.get("ring_text") or "", cand),     # (EVI-9)
         # DAT-3: "your rip log is dated 2005; this pressing came out in 2012" (or ""), and the
@@ -5705,6 +5783,7 @@ def classify(scored, cfg):
                                            bool(format_contradictions(s)) and not _carries_barcode(s),
                                            not barcode_agrees(s),
                                            not number_agrees(s), not s["year_ok"],
+                                           not s.get("press_year_ok"),               # (CTY-3: a preference)
                                            s.get("year_off") if s.get("year_off") is not None else 99))
     # TIE-4: an unofficial release (a bootleg, a CD-R) nothing of your copy backs never wins a
     # tie against an official one that fits as well: bootlegs copy the official release's

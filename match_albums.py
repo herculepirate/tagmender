@@ -2541,6 +2541,8 @@ def read_album(album_dir, artist_folder, album_folder, exclude=(), blind=False):
         "catno_search": sorted({c for _p, i in infos for c in mc.split_codes(i["catno"])} | set(folder_hints)
                                | set(typed_search) | set(sacd_disc)),
         "pressing_year": mc.pressing_year(album_folder) or mc.pressing_year(title) or _log_year(album_dir, logs),
+        # CTY-3: "Press 1986", "Re2015": a preference between pressings only (match_core.press_year)
+        "press_year": mc.press_year(album_folder),
         "media_hint": hint, "media_hint_from": hint_from,
         # MED-14: a CD count in every disc's album tag - weaker than the folder name and the
         # audio (copy_source, match_core.copy_kind, file_clues): no media hint of its own
@@ -5186,6 +5188,8 @@ def version_priority(album, catnos=(), country="", formats=()):
     folder = mc.fold(album.get("folder") or "")
     cc = mc.country_code(country)
     named = {c for n, c in mc._COUNTRY_NAMES.items() if len(n) > 2 and f" {n} " in f" {folder} "}
+    # (CTY-3: "{South Korean Press}" - the brackets file_clues reads, never the title's words)
+    named |= mc.demonym_countries(mc._bracket_text(album.get("folder"), pressing_only=True))
     kinds = {mc.media_kind(f) for f in formats if f}
     want = fetch_kinds(album)
     return (0 if mine & theirs else 1, 0 if cc and cc in named else 1, 0 if want & kinds else 1)

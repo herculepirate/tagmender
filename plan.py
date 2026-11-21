@@ -3991,7 +3991,28 @@ class Planner:
         had = _vals(before.get("comment"))
         # (a kept comment is the file's own text, whatever a script or the release would have put)
         base = had if pol in ("preserve", "fill_missing") or "comment" not in changes else _vals(changes["comment"])
+        # VIN-4: a Vorbis/APEv2 comment ending in brackets - "Mercury - 00602547118295, Re2015, EU
+        # (omp30)" - reads as the described comment comment:omp30, and the file has no plain one:
+        # the line goes below the one value it is added to, that value kept byte for byte as the
+        # file stores it (tagio.comment_items); every other value stays exactly as it is (before,
+        # the line was written as a value of its own and the preview showed the comment empty)
+        folded = None
+        if not (base or had):
+            fam, items = tagio.comment_items(f)
+            if fam in ("vorbis", "apev2"):
+                usable = [it for it in items if it[1] != "comment" and it[1] not in changes
+                          and p.policy(it[1]) != "lock"]
+                folded = next((it for it in usable if any(vinylrip.own_line(ln) for ln in it[0].splitlines())),
+                              usable[0] if usable else None)
+            if folded:
+                had = base = [folded[0]]
         after = vinylrip.merged_values(base, line)
+        if folded and after != had:
+            key, rest = folded[1], _vals(before.get(folded[1]))
+            if folded[2] in rest:
+                rest.remove(folded[2])
+            changes[key] = rest or None              # (its text is in the plain comment now, whole)
+            rows[:] = [r for r in rows if r.get("field") != key]
         if after == had:
             if "comment" in changes:                   # (the plan would write only what is there)
                 changes.pop("comment")
@@ -4031,8 +4052,8 @@ class Planner:
         artist = str((first.get("albumartist") or [""])[0])
         comments = []
         for f in kept[:3]:
-            try:
-                comments += [str(x) for x in tagio.read(f).get("comment") or ()]
+            try:                                 # (VIN-8: "..., EU (omp30)" whole, its signature kept)
+                comments += [it[0] for it in tagio.comment_items(f)[1]]
             except Exception:
                 pass
         try:

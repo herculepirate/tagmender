@@ -2731,6 +2731,14 @@ class Engine:
             got = self._claim(folder, parts, per)
             if got is None and g.set_shape == "discs" and len(per) == len(parts):
                 got = self._set_search(folder, parts, per)
+            if got is None and g.set_shape == "discs" and any(getattr(q, "layer", "") for q in parts):
+                # DSC-17: disc folders of one album folder that are layers of one hybrid SACD ("Disc
+                # 01" its CD layer, "Disc 02" its stereo layer - a one-disc release DSC-10's claim never
+                # joins): one album of it as DSC-11 joins album folders - each folder its own medium
+                # or layer of the one release, no disc or layer taken twice - never two rows
+                layered = self._release_folders(folder, parts, per, out)
+                if layered["members"]:
+                    return layered
         finally:
             self._in_set, self._alone = was_in, was_alone
             if albums:
@@ -3782,7 +3790,10 @@ class Engine:
             # (REP-2: credits taken back only where every folder's database read them whole)
             joined.credits_read = {k: (all(c.get(k) for c in cr) if k != "protected" else
                                        sorted({x for c in cr for x in c.get(k) or ()})) for k in cr[0]}
-        names = ", ".join(f"'{part.folder.name}' -> " + ", ".join(
+        # (copies of one album folder - DSC-17's disc folders - named by their disc folders: never
+        # the album folder twice)
+        shared = len({os.path.realpath(str(part.folder)) for _i, part, _p in members}) < len(members)
+        names = ", ".join(f"'{_copy_name(part) if shared else part.folder.name}' -> " + ", ".join(
             f"disc {d}" + ("" if k == "disc" else f" ({k} layer)")
             for d, k in sorted(self._slots(p), key=lambda s: (int(s[0]) if s[0].isdigit() else 0, s[1])))
             for _i, part, p in members)

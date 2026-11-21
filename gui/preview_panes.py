@@ -215,6 +215,15 @@ def album_discs(a) -> list:
         was = old_value(fe, "title")
         note = tr("title differs") if was and new_value(fe, "title") and was != new_value(fe, "title") else ""
         d["tracks"].append({"number": no, "title": title, "fe": fe, "missing": False, "note": note})
+    # MED-22c / DSC-17: a one-disc album with an SACD layer's copy beside its CD layer's - the
+    # CD layer's files at the album folder's root, their disc number kept (no change row) - is
+    # disc n twice: its files of no number are that disc's, "Disc 01" beside "Disc 01 (SACD Stereo)"
+    layered = {k[0] for k in discs if k[1] and k[0] is not None}
+    if (None, "") in discs and len(layered) == 1 and not any(k[0] is not None and not k[1] for k in discs):
+        n = next(iter(layered))
+        d = discs.pop((None, ""))
+        d["key"] = (n, "")
+        discs[(n, "")] = d
     out = []
     for key in sorted(discs, key=lambda k: (k[0] is None, k[0] or 0, k[1])):
         d = discs[key]

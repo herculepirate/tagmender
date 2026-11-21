@@ -1,5 +1,18 @@
 # Release notes
 
+## 0.8.94
+
+**Two rips of one record are two albums in your player**
+- A vinyl rip's Album tag now names the rip as its folder does: "Lateralus [2005 Vinyl Rip 61422-3116-1]", "Piano Man [1977 Vinyl Rip PBTHAL SRM-1-1184]". Players such as LMS group tracks by album title, release ID, disc numbers and album artist, not by folder, so two rips of one pressing used to show as one album with both rips' tracks mixed.
+- A second copy whose details are the same (no ripper or year ripped to tell them apart) adds its resolution to its Album tag only: "[1977 Vinyl Rip SRM-1-1184 32-192]". Folder names never carry the resolution.
+- Vinyl albums filed before get their Album tag rewritten once the next time you apply them; their folders are not renamed. "Keep each vinyl rip in its own folder" off keeps the old "[1977 Vinyl Rip]".
+
+**One album folder is one album**
+- An album folder whose disc folders hold the CD layer and an SACD layer of one hybrid SACD is now one album, one row: "Disc 01" beside "Disc 01 (SACD Stereo)". Peter Gabriel's 1 (Car) was two rows, its CD layer with no disc number. Scans anywhere in the album folder count for every disc.
+
+**Look-up**
+- An album that was waiting to be looked up and then taken by a look-up no longer says "Waiting…" once found, and the line under the list no longer counts it as queued.
+
 ## 0.8.93
 
 **Vinyl rips: which pressing, and how sure**

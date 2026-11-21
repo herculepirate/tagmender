@@ -1490,7 +1490,10 @@ class Overview(QWidget):
         if self.running:
             # (LKP-1: during a look-up they join it when they can, else wait for it)
             for a in (self.join_look_up(mode, fresh)[0] if self.looking else fresh):
-                self.queue.setdefault(self.album_key(a), (mode, False))
+                k = self.album_key(a)
+                if self.looking.get(k) == (self.profile_of(a), mode):
+                    continue                                 # (LKQ-1: looked up this way now: not queued too)
+                self.queue.setdefault(k, (mode, False))
             self.model.refresh_rows()                        # (their rows: Waiting…)
             if self.looking and getattr(self, "_lookup_n", 0):
                 self.summary.setText(self.lookup_words(self._lookup_i, self._lookup_name))
@@ -2260,6 +2263,12 @@ class Overview(QWidget):
                 for b in more.close():                      # (added, never started: looked up after)
                     untaken.extend(b[3].close())
         self.looking = {k: (name, mode) for name, ks in groups.items() for k in ks}
+        # LKQ-1: an album queued with these sources (dropped while a folder was read, say) and
+        # looked up now is no longer queued - else, its result in, its row said Waiting… and the
+        # line under the list counted it queued while the count said it was done
+        for k in self.looking:
+            if k in self.queue and self.queue[k][0] == mode:
+                self.queue.pop(k)
         self._lookup_again = again                         # (Refresh: so is what Apply interrupts)
         self._lookup_order = [k for ks in groups.values() for k in ks]
         self.states = dict.fromkeys(self._lookup_order, "waiting")

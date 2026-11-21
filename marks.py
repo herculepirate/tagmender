@@ -28,19 +28,19 @@ def is_hd(path) -> bool:
     return (getattr(info, "bits_per_sample", 0) or 0) > 16 or (getattr(info, "sample_rate", 0) or 0) > 44100
 
 
-def of_album(targets, files, folder="") -> str:
-    """The album's mark: "Vinyl Rip" when its release is on vinyl or its folder says so, "Tape
-    Rip" likewise for a cassette, "HD
+def of_album(targets, files, folder="", vinyl=False) -> str:
+    """The album's mark: "Vinyl Rip" when its release is on vinyl, its folder says so or the
+    copy's own evidence does (vinyl: VIN-10), "Tape Rip" likewise for a cassette, "HD
     Audio" when any of its files is finer than a CD, else ""."""
     kinds = {mc.media_kind(m) for t in targets or () for m in t.get("media") or ()}
-    if "vinyl" in kinds or mc.media_hint(Path(str(folder)).name) == "vinyl":
+    if "vinyl" in kinds or vinyl or mc.folder_says_vinyl(Path(str(folder)).name):
         return VINYL
     if "cassette" in kinds or mc._CASSETTE_HINT.search(Path(str(folder)).name):
         return TAPE                                                       # MED-6
     return HD if any(is_hd(f) for f in files or ()) else ""
 
 
-def apply(targets, files, folder, profile, full_targets=None) -> list:
+def apply(targets, files, folder, profile, full_targets=None, vinyl=False) -> list:
     """The tracks' tags with the album's mark where the file and the tags have no Grouping
     (marks.grouping on, and Grouping not among the profile's level_fields.drop). full_targets:
     the tags before the tagging level cut them, for the release's media."""
@@ -48,7 +48,7 @@ def apply(targets, files, folder, profile, full_targets=None) -> list:
         return targets
     if "grouping" in {str(x).lower() for x in (profile.get("level_fields") or {}).get("drop") or ()}:
         return targets
-    mark = of_album(full_targets or targets, files, folder)
+    mark = of_album(full_targets or targets, files, folder, vinyl)
     if not mark:
         return targets
     files = list(files or ())

@@ -565,6 +565,14 @@ def press_year(text):
     years = [int(y) for y in re.findall(r"[\(\[\{]\s*(19[5-9]\d|20\d\d)\s*[\)\]\}]", str(text or ""))]
     if len(years) >= 2 and years[1] > years[0]:
         return years[1]
+    # VIN-11: "Tool - 2001 - Lateralus (2020)": a year in a bracket of its own after the album's
+    # year written outside brackets before it ("Artist - 2001 - Album", "2001 - Album") likewise
+    m = re.search(r"[\(\[\{]\s*(19[5-9]\d|20\d\d)\s*[\)\]\}]", str(text or ""))
+    if m:
+        head = re.sub(r"[\(\[\{][^\)\]\}]*[\)\]\}]", " ", str(text)[:m.start()])
+        bare = re.findall(r"(?:^|\s-\s|^\s*)(19[5-9]\d|20\d\d)\s+-\s", head)
+        if bare and int(m.group(1)) > int(bare[-1]):
+            return int(m.group(1))
     return None
 
 
@@ -906,6 +914,15 @@ def catno_same(a, b):
     or a long number with and without its check digit ("99833708" / "9983370")."""
     # formats written after the number: "SPV 69848 CD+DVD" is SPV 69848 (Kreator - Enemy
     # Of God Revisited); only after a space, so "FO40CD" keeps its CD
+    # CAT-10: a CD's number and a record's with one base number are two products ("SPV 79690 CD",
+    # "SPV 79690 LP"): never the same
+    kinds = []
+    for x in (a, b):
+        m = _FORMATS_AFTER.search(str(x or ""))
+        w = m.group(0).strip().casefold() if m else ""
+        kinds.append("lp" if w.startswith("lp") else "cd" if re.match(r"\d?\s?cds?\b", w) else "")
+    if all(kinds) and kinds[0] != kinds[1]:
+        return False
     a, b = (_FORMATS_AFTER.sub("", str(x or "")) or str(x or "") for x in (a, b))
     # a box set's number with the disc after it: "8122796510-1" is disc 1 of 8122796510
     for x, y in ((a, b), (b, a)):
@@ -2497,7 +2514,9 @@ CLUE_WEIGHTS = {"disc TOC": 3, "disc TOC (fuzzy)": 1, "barcode": 5, "barcode (no
                 "catalogue number": 4, "source link": 3, "isrc": 2,
                 "fingerprint": 2, "date": 2, "matrix": 3, "sid code": 1, "label code": 1, "cover": 0,
                 "label": 1, "packaging": 1, "country": 1, "format": 1, "physical": 1, "track lengths": 1,
-                "exact lengths": 2, "track titles": 1, "script": 1}
+                "exact lengths": 2, "track titles": 1, "script": 1, "tag country": 0}
+# ("tag country", CAT-10: a vinyl copy's plain COUNTRY tag - often the artist's own country -
+# agreeing: told beside the pick, never weighed, never against a pressing)
 # "exact lengths" (exact_lengths: every track fits where the others are off track by track)
 # outweighs one weight-1 clue: other pressings 2 s+ off on several tracks are another mix
 # "disc TOC (fuzzy)": a fuzzy disc ID or CTDB match, "a CD of about these lengths" (file_clues):
@@ -3065,6 +3084,8 @@ def file_clues(album, cand, clues, against, cfg=None):
             clues.setdefault("country", f"release country {_readable_country(tc)} in the tags")
         elif "XW" not in (tc, cc):
             against.append(f"tags say {tc}, this pressing is from {cand.get('country')}")
+    elif not tc and cc and not by_tagger and country_code(album.get("tag_country_plain")) == cc:
+        clues.setdefault("tag country", f"country {_readable_country(cc)} in the COUNTRY tag (CAT-10)")
     tm = None if by_tagger else album.get("tag_media")
     if tm and formats:
         if tm in formats:
@@ -4621,6 +4642,30 @@ def _medium_words(cand, position, fmt) -> str:
     return f"disc {disc} ({fmt_words})"
 
 
+def vinyl_records(album) -> int:
+    """VIN-10: how many records a vinyl rip shows - its sides, two to a record (3 or 4 sides: 2 LPs),
+    never fewer than its disc tags count (a 2LP tagged 1 and 2 with sides A/B on each); 0 when
+    it shows no sides and its disc tags count one disc."""
+    sides = album.get("vinyl_sides") or 0
+    discs = album.get("discs") or 1
+    by_sides = (sides + 1) // 2 if sides >= 2 else 0
+    return max(by_sides, discs if discs > 1 else 0)
+
+
+def vinyl_discs_fit(album, cand):
+    """VIN-10: a vinyl rip's record count (vinyl_records) against a record release's disc count:
+    True when they agree, False when they do not, "" when nothing is compared - the copy shows
+    no sides and is numbered as one disc (a rip of a 2LP numbered 1..13 says nothing of its
+    records). None: no vinyl rip, or a release that is not records alone."""
+    if (album.get("media_hint") or "") != "vinyl" or not cand.get("disc_count"):
+        return None
+    formats = set(cand.get("formats") or ())
+    if not formats or formats - {"vinyl"}:
+        return None
+    records = vinyl_records(album)
+    return (records == cand["disc_count"]) if records else ""
+
+
 def score_candidate(album, cand, cfg, ocr_text=""):
     """Score one candidate against one album. Returns a dict with the
     confidence (0-100), the evidence for it and every gate that failed."""
@@ -4940,12 +4985,20 @@ def score_candidate(album, cand, cfg, ocr_text=""):
                 notes.append(f"durations unavailable ({dur_cov:.0%} listed)")
 
     # disc layout
-    if album["discs"] and cand["disc_count"]:
+    lp_fit = vinyl_discs_fit(album, cand)
+    if lp_fit is True:
+        avail += cfg["w_discs"]
+        pts += cfg["w_discs"]
+        notes.append(f"{vinyl_records(album)} records ({album.get('vinyl_sides') or 0} vinyl sides), like the release")
+    elif lp_fit is None and album["discs"] and cand["disc_count"]:
         avail += cfg["w_discs"]
         if album["discs"] == cand["disc_count"]:
             pts += cfg["w_discs"]
         else:
             notes.append(f"disc count {album['discs']} vs {cand['disc_count']}")
+    elif lp_fit is False:
+        avail += cfg["w_discs"]
+        notes.append(f"{vinyl_records(album)} records ({album.get('vinyl_sides') or 0} vinyl sides) vs {cand['disc_count']}")
 
     # year (reissues are common, so a mismatch only withholds points)
     year_ok = False
@@ -5058,7 +5111,8 @@ def score_candidate(album, cand, cfg, ocr_text=""):
         "copy_hint": album.get("media_hint") or "",
         "copy_kind": copy_kind(album),
         "record_copy": record_copy(album),
-        "discs_off": bool(album["discs"] and cand["disc_count"] and album["discs"] != cand["disc_count"]),
+        "discs_off": (lp_fit is False) if lp_fit is not None else
+        bool(album["discs"] and cand["disc_count"] and album["discs"] != cand["disc_count"]),
         "pressing_year": album.get("pressing_year"), "press_year": press, "press_year_ok": press_ok,
         "clues": clues, "clues_against": clues_against, "year_off": year_off,
         "matrix_words_seen": matrix_words_seen(album.get("ring_text") or "", cand),     # (EVI-9)
@@ -5740,6 +5794,13 @@ def cat3_own(scored):
 # VIN-9: the kinds of copy whose every pressing of one master carries the same audio, so that
 # listed track lengths (typed in per entry, often off the sleeve) never tell its pressings apart
 RECORD_KINDS = ("vinyl", "cassette")
+
+
+def folder_says_vinyl(name) -> bool:
+    """VIN-10: the folder name says vinyl rip and names no CD or download shop beside it
+    ("Album [Vinyl Rip]", never "Album (Deluxe 2CD + LP)" nor "(Vinyl Master) [Qobuz 24-96]")."""
+    name = str(name or "")
+    return media_hint(name) == "vinyl" and not _CD_HINT.search(name) and not download_store(name)
 
 
 def record_copy(album) -> str:
@@ -6588,6 +6649,17 @@ def same_pressing(a, b, sole_digital=False, disc_on_both=False):
     fa, fb = set(a.get("formats") or ()), set(b.get("formats") or ())
     if fa and fb and not fa & fb:
         return False
+    # VIN-11: records of other years are other pressings, whatever number and barcode they share
+    # (Tool - Lateralus: the 2005 US 2LP and the 2020 picture-disc reissue, both 61422-3116-1 LP and
+    # 614223116013)
+    # (a year apart, a December release or a date typed off by one: one pressing when its number
+    # and its barcode or label agree)
+    if fa and fb and fa | fb <= set(RECORD_KINDS) and _year_of(a) and _year_of(b) and _year_of(a) != _year_of(b):
+        near = abs(_year_of(a) - _year_of(b)) == 1 and catnos_agree(_catnos(a), _catnos(b)) and (
+            ({barcode_key(x) for x in a.get("barcodes") or ()} & {barcode_key(x) for x in b.get("barcodes") or ()}) - {""}
+            or (a.get("label") and b.get("label") and _label_key(a.get("label")) & _label_key(b.get("label"))))
+        if not near:
+            return False
     a, b = dict(a, catnos=_catnos(a)), dict(b, catnos=_catnos(b))
     digital = sole_digital and fa == fb == {"digital"} and _lengths_agree(a, b)
     # one barcode is often printed on several countries' pressings (SPV's US and German
@@ -7357,6 +7429,88 @@ def lengths_all_agree(b) -> bool:
 
 
 def combine(mb_result, dg_result, countries=None, prefs=None):
+    """_combine's pick, a record pick whose only proof is a catalogue number other pressings of
+    the album carry too made TIE-1's guess (VIN-11, shared_record_number)."""
+    return shared_record_number(_combine(mb_result, dg_result, countries, prefs), mb_result, dg_result)
+
+
+_CATNO_CODES = ("catalogue number", "catalogue number (folder name)", "catalogue number (OCR)")
+
+
+def _year_of(c):
+    m = re.match(r"\s*(\d{4})", str(c.get("year") or ""))
+    return int(m.group(1)) if m else None
+
+
+def _one_pressing(a, b) -> bool:
+    """VIN-11: scored entries A and B are one record pressing as far as their entries tell: one
+    MusicBrainz entry and one Discogs entry that are twins (same_pressing, or MusicBrainz links
+    that Discogs release), or two whose countries agree - a blank country or a region (XE, XW:
+    "Europe", "Worldwide") stands for any; names fold to codes ("UK" is GB) - and whose years
+    are one or one apart (a December release, a date typed off by one), or one of them undated."""
+    ca, cb = a["cand"], b["cand"]
+    if ca.get("source") != cb.get("source"):
+        mb, dg = (ca, cb) if ca.get("source") == "mb" else (cb, ca)
+        if str(dg.get("id") or "") in linked_discogs(mb) or same_pressing(mb, dg):
+            return True
+    xa, xb = country_code(ca.get("country")), country_code(cb.get("country"))
+    if xa and xb and xa != xb and not {xa, xb} & {"XE", "XW"}:
+        return False
+    ya, yb = _year_of(ca), _year_of(cb)
+    return ya is None or yb is None or abs(ya - yb) <= 1
+
+
+def _pressing_keys(scored) -> list:
+    """VIN-11: the pressings of SCORED, each [(entries)]: entries one pressing (_one_pressing)
+    joined, the rest apart."""
+    groups = []
+    for s in scored:
+        hit = [g for g in groups if any(_one_pressing(s, x) for x in g)]
+        merged = [s] + [x for g in hit for x in g]
+        groups = [g for g in groups if not any(g is h for h in hit)] + [merged]
+    return groups
+
+
+def shared_record_number(res, mb_result, dg_result):
+    """VIN-11 (decided 2026-11-21): for a record copy (vinyl, cassette: VIN-9's record_copy) a
+    catalogue number proves a pressing only when no other pressing of the album carries it, in
+    MusicBrainz and Discogs together (each candidate scored against your number as catno_same
+    and the CAT rules fold it; CD and download entries never counted; one pressing entered in
+    both databases, or twice, is one: its country and year). Carried by several, the number only
+    ordered them: the pick is TIE-1's guess, "pressing guessed (catalogue number shared by N
+    pressings ...)". A barcode, a matrix or runout, a disc ID, a label or country read on your
+    scans, a source link - anything else record_proof takes - is proof still; so is your own
+    choice of the release (never combined)."""
+    best = (res or {}).get("best")
+    if not best or res.get("status") != "auto" or best.get("tie_guess") or not record_kind(best):
+        return res
+    if best.get("own_decided") == CHOSEN_BY_YOU:
+        return res                                   # (CHG-1: the release you chose stays yours)
+    if best.get("code") not in _CATNO_CODES and not best.get("folder_catno_agrees"):
+        return res
+    bare = dict(best, code="", folder_catno_agrees=False,
+                clues={k: v for k, v in (best.get("clues") or {}).items() if k != "catalogue number"})
+    if record_proof(bare):
+        return res                                   # (other proof of your copy: a barcode, scans...)
+    pool = _unofficial_pool(res, (mb_result, dg_result))
+    kind = record_kind(best)
+    carriers = [x for x in pool if record_kind(x) == kind and x.get("tracks_ok")
+                and (x.get("code") in _CATNO_CODES or x.get("folder_catno_agrees"))
+                and _same_album(x, best, loose=True)
+                and (x["cand"].get("source") != best["cand"].get("source") or _same_group(x, best))]
+    if not any(x is best for x in carriers):
+        carriers.append(best)
+    groups = _pressing_keys(carriers)
+    if len(groups) < 2:
+        return res
+    others = [pressing_facts(g[0]) for g in groups if not any(x is best for x in g)]
+    by = f"catalogue number shared by {len(groups)} pressings; your copy names none of them otherwise"
+    guess = {"by": by, "pick": pressing_facts(best), "others": others}
+    return dict(res, best=dict(best, tie_guess=guess,
+                               notes=list(best.get("notes") or []) + [f"pressing guessed: {by} (VIN-11)"]))
+
+
+def _combine(mb_result, dg_result, countries=None, prefs=None):
     """Discogs first: it lists far more pressings (catalogue numbers, licensed
     editions) than MusicBrainz. A confident Discogs match decides the pressing; the
     MusicBrainz release of that SAME pressing, when there is one, comes along

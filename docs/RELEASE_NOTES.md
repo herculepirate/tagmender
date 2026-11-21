@@ -1,5 +1,16 @@
 # Release notes
 
+## 0.8.93
+
+**Vinyl rips: which pressing, and how sure**
+- A record's track lengths no longer prove a pressing: every pressing of a record has the same ones. A vinyl or cassette rip whose copy names nothing of its pressing (no barcode, catalogue number only it carries, matrix, label or country on its scans) is written as the pressing guessed, in full, and marked Partial "pressing guessed" until your copy proves one. Rush's Grace Under Pressure "(1984)(US)[LP]" was written as the German pressing and marked proven; it is now the US pressing, guessed.
+- A country code in the folder name - "(US)", "[JP]", "(1984, US)", "US Press" - chooses among the pressings, never proves one (also for CDs), and a later year in brackets - "(1984)(2015)", "2001 - Lateralus (2020)" - is the pressing's year.
+- A catalogue number that several pressings carry proves none of them; a release you chose yourself always stays your choice.
+
+**Vinyl rips known by what they show**
+- A rip is a vinyl rip when its own evidence says so, even if its folder name does not: a rip log naming the turntable, cartridge or phono stage, a source tag saying vinyl (also misspelt), its sides. Tool's Lateralus was filed as a hi-res download "[HD]" with no release; it is now the 2005 US double LP, "[2005 Vinyl Rip 61422-3116-1]". Tape rips, CDs ("[CD+LP]") and downloads ("[Qobuz]") are never taken for vinyl.
+- Sides count records (four sides are two LPs); a catalogue number in tags such as SERIAL_NO or CAT# is read; a vinyl rip's folder never names a barcode as its catalogue number.
+
 ## 0.8.92
 
 **One album folder holding several copies of a disc**

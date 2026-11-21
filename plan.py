@@ -144,6 +144,9 @@ class Proposal:
     # TIE-1 (2026-11-20): the pressing a tie-break picked and the plan writes in full, marked
     # Partial "pressing guessed" (same keys as suggested); {} when the pressing is proven
     guessed: dict = field(default_factory=dict)
+    # VIN-10: "vinyl" when the copy's own evidence says it is a vinyl rip (match_albums
+    # _media_hint: its folder name, rip notes, source tag, sides), whatever release is written
+    copy_media: str = ""
     # TAG-3: the release ID fields your files hold for another release, which your copy proves
     # this one over (engine._one_release): the plan writes the release at the replace threshold
     release_proven_over: list = field(default_factory=list)
@@ -4076,13 +4079,18 @@ class Planner:
             vinyl = naming.edition_parts({"media": rel["media"]})[0] == "Vinyl"
         elif unproven:
             vinyl = (bool(media) and all(mc.media_kind(m) == "vinyl" for m in media)) or \
-                mc.media_hint(Path(str(prop.source_dir)).name) == "vinyl"
+                mc.folder_says_vinyl(Path(str(prop.source_dir)).name) or \
+                getattr(prop, "copy_media", "") == "vinyl"       # (VIN-10: the copy's own evidence)
         else:
             vinyl = bool(media) and mc.media_kind(media[0]) == "vinyl"
         if not vinyl:
             return {}
         first = targets.get(kept[0]) or {}
-        catno = "" if unproven else str((first.get("catalognumber") or [""])[0]).strip()
+        # (VIN-11: the pressing's catalogue number, never a 12-13 digit barcode an entry lists as one
+        # - Discogs 10315855's "0614223116013": none then)
+        catno = "" if unproven else next(
+            (str(c).strip() for c in first.get("catalognumber") or () if str(c).strip()
+             and not re.fullmatch(r"\d{12,13}", re.sub(r"[\s-]", "", str(c)))), "")
         # (an album known writes the date its tied pressings share: a year in your folder name that is
         # theirs - "[2025 Vinyl Rip ...]" of 2025 reissues - is the pressing's, never the year ripped)
         pressing = str((rel.get("date") or first.get("date") or [""])[0])[:4]

@@ -143,7 +143,21 @@ _CODEC_OF_EXT = {".flac": "flac", ".wav": "wav", ".aiff": "aiff", ".aif": "aiff"
 CD_FRAME = 588          # a CD sector holds 588 stereo samples at 44.1 kHz
 # catalogue number tag names used by Picard, JRiver (LABELNO), foobar2000, Mp3tag and others
 _CATNO_KEYS = ("catalognumber", "labelno", "catalogno", "catalog", "catno", "catalog#",
-               "cataloguenumber", "catalogue", "catalogueno")
+               "cataloguenumber", "catalogue", "catalogueno",
+               # CAT-10: other taggers' and rippers' names for it ("SERIAL_NO", "CAT#", "CATNR")
+               "cat#", "catnr", "catnum", "catalognr", "catalognum", "cataloguenr", "catalogue#",
+               "serialno", "serialnumber", "serial#")
+# CAT-10: a whole format word after the number in such a tag, searched without it ("61422-3116-1
+# LP", "TOOL 8391 (2LP)", "XYZ 123 CD"): LP, 2LP / 2xLP, CD, MC, EP, Vinyl - never a digit of the
+# number ("ABC 1 CD" is ABC 1) nor a glued "3CD" (4AD's "CAD 3CD" is the number)
+_CATNO_FORMAT_TAIL = re.compile(r"\s+[(\[]?(?:(?:[2-9]\s*x\s*|[2-9])?LP|CD|MC|EP|vinyl)[)\]]?\s*$", re.I)
+# VIN-10: tag names that say what the copy was ripped from ("SOURCE", "SCOURCE", "RIP SOURCE");
+# a name one letter off "source" counts too ("scource", "sorce"), never "course"
+_SOURCE_KEYS = ("source", "sourcemedia", "sourcemedium", "ripsource", "mediasource", "sourceformat",
+                "sourcetype", "ripfrom", "rippedfrom", "lineage")
+# ... and tag names that may name a release's media too (another tagger copies them from the
+# release it chose): a weak sign only
+_MEDIA_KEYS = ("media", "medium", "mediatype", "format", "releaseformat")
 # barcode tag names: Picard's BARCODE, and the UPC / EAN / "EAN/UPN" other taggers and shops
 # write (compared without spaces, dashes, underscores or slashes)
 _BARCODE_KEYS = ("barcode", "upc", "ean", "eanupn", "eanupc", "upcean", "ean13", "upca", "upccode",
@@ -151,6 +165,64 @@ _BARCODE_KEYS = ("barcode", "upc", "ean", "eanupn", "eanupc", "upcean", "ean13",
 _ASIN_KEYS = ("asin", "amazonid", "amazonasin")
 # An Amazon product ID: "B0..." or, for older CDs and books, an ISBN-10-like number
 _ASIN = re.compile(r"(?:B0[0-9A-Z]{8}|\d{9}[\dX])")
+
+
+def _tag_catno_forms(infos) -> tuple:
+    """CAT-10: the catalogue numbers the files' tags hold - (each as written, as searched): a
+    number is compared as written; a whole format word after it ("61422-3116-1 LP") is left out
+    of the search only, never of the number compared."""
+    whole, searched = [], []
+    for _p, i in infos:
+        for c in mc.split_codes(i["catno"]):
+            bare = _CATNO_FORMAT_TAIL.sub("", c).strip() or c
+            if c not in whole:
+                whole.append(c)
+            if bare not in searched:
+                searched.append(bare)
+    return whole, searched
+
+
+def _one_off(a, b):
+    """A and B differ by one letter added, dropped or changed."""
+    if a == b or abs(len(a) - len(b)) > 1:
+        return a == b
+    if len(a) > len(b):
+        a, b = b, a
+    i = 0
+    while i < len(a) and a[i] == b[i]:
+        i += 1
+    return a[i + (len(a) == len(b)):] == b[i + 1:]
+
+
+def _source_key(key):
+    """VIN-10: a tag name that says what the copy was ripped from (misspelt too)."""
+    k = _plain_key(key)
+    return k in _SOURCE_KEYS or (k not in ("course", "sources", "sourced", "resource") and _one_off(k, "source"))
+
+
+# VIN-10: a value naming a record as what was ripped: "VINYL", "Vinyl LP", "2LP", "12\" Vinyl", "7\"",
+# "Vinyl > 24/96" - the record first, never "WEB (vinyl master)", "CD", "Vinyl remaster" (a
+# master's word), "Record Store Day 2019 WEB" (a shop's or a download's word anywhere)
+_VINYL_VALUE = re.compile(r"^\W*(?:\d\s*x\s*|\d\s*)?(?:vinyl|LPs?|12\"|10\"|7\"|record|schallplatte)(?![\w\"])", re.I)
+_NOT_VINYL_VALUE = re.compile(r"\b(?:re-?master\w*|master(?:ed)?|web|cd|digital|download\w*|stream\w*|store|shop|"
+                              r"qobuz|tidal|bandcamp|hdtracks|itunes|cassette|tape|reel)\b", re.I)
+# a disc number that is a record's side ("A", "B2", "Side C")
+_SIDE_DISC = re.compile(r"^\s*(?:side\s*)?([A-H])\s*\d{0,2}\s*$", re.I)
+
+
+def _source_tags(t, items):
+    """VIN-10: what the file's tags say it was ripped from - t["source_vinyl"] (a source tag naming
+    the record: strong), t["media_vinyl"] (a media/format tag naming it: weak)."""
+    for k, v in items:
+        val = _txt(v if isinstance(v, (list, tuple)) else [v])
+        if val and (_source_key(k) or _plain_key(k) in _MEDIA_KEYS):
+            t["source_any"] = f"{t.get('source_any', '')} {val}".strip()      # (a tape's word vetoes)
+        if not val or not _VINYL_VALUE.search(val) or _NOT_VINYL_VALUE.search(val):
+            continue
+        if _source_key(k):
+            t["source_vinyl"] = val
+        elif _plain_key(k) in _MEDIA_KEYS:
+            t["media_vinyl"] = val
 
 
 def _plain_key(key):
@@ -1211,6 +1283,7 @@ def read_file(path, before=None):
     t = {"title": "", "num": 0, "disc": 0, "album": "", "artist": "", "track_artist": "", "year": 0,
          "barcode": "", "barcode_from": "", "asin": "", "catno": "", "secs": 0.0,
          "label": "", "country": "", "media": "", "date": "",   # pressing details in the tags
+         "country_plain": "",                                   # (CAT-10: a plain COUNTRY tag)
          "rate": 0, "bits": 0, "samples": 0, "lossless": False,  # the audio itself
          "has_ids": False,      # already carries a MusicBrainz or Discogs release ID
          "mb_albumid": "", "discogs_releaseid": "",    # ... and which (a candidate, not evidence)
@@ -1326,6 +1399,8 @@ def read_file(path, before=None):
                     _track_id(t, (frame.data or b"").decode("ascii", "ignore"))
             t["tracktotal"] = _total(fr("TRCK"))
             t["num0"] = _numbered_zero(fr("TRCK"))
+            t["disc_raw"] = fr("TPOS")                # (VIN-10: a record's side, "A", "B2")
+            _source_tags(t, [(fr_.desc, fr_.text) for fr_ in tags.getall("TXXX")])
             return t
         low = {}
         for k, v in tags.items():
@@ -1360,9 +1435,13 @@ def read_file(path, before=None):
                  catno=next((g(k) for k in _CATNO_KEYS if g(k)), ""),
                  label=g("label") or g("organization") or g("publisher"),
                  country=g("releasecountry"), media=g("media"), date=g("date"),
+                 # (CAT-10: a plain COUNTRY tag, "U.S.A.": a vinyl copy's positive clue only)
+                 country_plain=g("country"),
                  credit=" ".join(g(k) for k in ("artist", "copyright", "composer", "performer", "conductor")))
         t["tracktotal"] = _int(g("tracktotal") or g("totaltracks")) or _total(g("tracknumber"))
         t["num0"] = _numbered_zero(g("tracknumber"))
+        t["disc_raw"] = g("discnumber")               # (VIN-10: a record's side, "A", "B2")
+        _source_tags(t, low.items())
         _write_failed(t, g("tagmenderreason"))
         t["tm_mark"] = bool(g("tagmender") or g("tagmenderreason"))     # (REP-1: may be TagMender's)
         t["cdtoc"] = g("cdtoc")
@@ -2440,6 +2519,7 @@ def read_album(album_dir, artist_folder, album_folder, exclude=(), blind=False):
     typed = {mc.norm_code(c) for c in note_catnos + log_codes}
     typed_search = [c for c in note_catnos + log_codes if c not in folder_hints]
     tags_barcodes = {mc.norm_code(i["barcode"]) for _p, i in infos if i["barcode"]}
+    tag_codes, tag_search = _tag_catno_forms(infos)          # CAT-10
     sacd_disc = sacd_disc_catnos(album_dir, album_folder)
     headers = [log["header"] for log in ripped if log.get("header")]
     # DAT-3: the year your files were ripped, from a dated EAC/XLD log that is of these files
@@ -2519,7 +2599,7 @@ def read_album(album_dir, artist_folder, album_folder, exclude=(), blind=False):
         "asins": sorted({i["asin"] for _p, i in infos if i.get("asin")}),
         # catalogue numbers from the tags, plus any written in the folder name
         # or album title ("[20bit RM DOMO 71063-2]")
-        "catnos": ({mc.norm_code(c) for _p, i in infos for c in mc.split_codes(i["catno"])}
+        "catnos": ({mc.norm_code(c) for c in tag_codes}
                    | {mc.norm_code(h) for h in folder_match} | typed | {mc.norm_code(c) for c in sacd_disc}),
         # MED-13: the number an SACD extraction log read off the disc itself: your copy's own
         "catnos_sacd_disc": sorted({mc.norm_code(c) for c in sacd_disc}),
@@ -2532,18 +2612,20 @@ def read_album(album_dir, artist_folder, album_folder, exclude=(), blind=False):
                                if re.search(r"\s[A-Z]-\d$", h)},
         # CAT-3: of which one-digit label codes ("RHEADCDX 1"), not in the tags or notes too
         "catnos_cat3": ({mc.norm_code(h) for h in folder_match if mc.cat3_hint(h)} - typed
-                        - {mc.norm_code(c) for _p, i in infos for c in mc.split_codes(i["catno"])}),
+                        - {mc.norm_code(c) for c in tag_codes}),
         # ... and those from the tags (mc.tagger_catno: another tagger's word only)
-        "tag_catnos": {mc.norm_code(c) for _p, i in infos for c in mc.split_codes(i["catno"])},
+        "tag_catnos": {mc.norm_code(c) for c in tag_codes},
         # ... of which the ripper typed in notes or a log (told apart from the folder's in the notes)
         "catnos_typed": typed - {mc.norm_code(h) for h in folder_match},
         "catnos_from_logs": sorted({mc.norm_code(c) for c in log_codes}),
-        "catno_search": sorted({c for _p, i in infos for c in mc.split_codes(i["catno"])} | set(folder_hints)
+        "catno_search": sorted(set(tag_search) | set(folder_hints)
                                | set(typed_search) | set(sacd_disc)),
         "pressing_year": mc.pressing_year(album_folder) or mc.pressing_year(title) or _log_year(album_dir, logs),
         # CTY-3: "Press 1986", "Re2015": a preference between pressings only (match_core.press_year)
         "press_year": mc.press_year(album_folder),
         "media_hint": hint, "media_hint_from": hint_from,
+        # VIN-10: a vinyl rip's sides, by its names, disc numbers, pictures or notes (0: none shown)
+        "vinyl_sides": vinyl_sides(album_dir, [p.name for p in files], infos, notes) if hint == "vinyl" else 0,
         # MED-14: a CD count in every disc's album tag - weaker than the folder name and the
         # audio (copy_source, match_core.copy_kind, file_clues): no media hint of its own
         "tags_media": "cd" if box_tags else "", "tags_media_from": box_tags,
@@ -2566,6 +2648,8 @@ def read_album(album_dir, artist_folder, album_folder, exclude=(), blind=False):
         # and its head is not the folder above (with_reading; None otherwise)
         "folder_reading": folder_read,
         "tag_label": top("label"), "tag_country": top("country"),
+        # CAT-10: a plain COUNTRY tag of a vinyl copy (an artist's country as often): told, never weighed
+        "tag_country_plain": top("country_plain") if hint == "vinyl" else "",
         # labels to search with the catalogue number: the tags', then the ripper's notes'
         "search_labels": search_labels(top("label"), notes),
         "tag_media": mc.media_kind(top("media")), "tag_date": top("date"),
@@ -2787,6 +2871,131 @@ def vinyl_rip_said(infos, notes) -> str:
     return ""
 
 
+# VIN-10: the record player a rip's notes name on a labelled line - its turntable ("TT:",
+# "Turntable:"; never "TT: 44:12", a total time), its tonearm ("Tonearm:", "Arm:"), its cartridge
+# ("Cartridge:", "Stylus:", "Needle:") and its phono stage ("Phono preamp:", "Phonopreamplifier:",
+# "Phono stage:", "RIAA:"). Never "Deck:": a tape deck is one too.
+_GEAR_LINE = (("turntable", re.compile(r"(?im)^[ \t*•-]*(?:TT|turntable)[ \t]*[:=][ \t]*(?!\d{1,3}[:.]\d\d\b)\S")),
+              ("tonearm", re.compile(r"(?im)^[ \t*•-]*(?:tone[ \t-]?arm|arm)[ \t]*[:=][ \t]*\S")),
+              ("cartridge", re.compile(r"(?im)^[ \t*•-]*(?:cartridge|stylus|needle)[ \t]*[:=][ \t]*\S")),
+              ("phono stage", re.compile(r"(?im)^[ \t*•-]*(?:phono[ \t-]*(?:pre[ \t-]*)?(?:amp(?:lifier)?|stage|pre)|riaa"
+                                         r"(?:[ \t]+(?:pre[ \t-]*)?amp(?:lifier)?|[ \t]+stage)?)[ \t]*[:=][ \t]*\S")))
+# VIN-10: a record's sides the notes list on lines of their own ("Side A  EX / NM", "Side C: ...")
+_SIDE_LINE = re.compile(r"(?im)^[ \t*•-]*side[ \t]*([A-H])\b(?![\w'’])")
+# VIN-10: a tape's words - in the notes, the tags or a picture's name - veto vinyl from own evidence
+_TAPE_WORD = re.compile(r"\b(?:cassettes?|tapes?|tape[ \t-]?deck|reel(?:[ \t-]?to[ \t-]?reel)?|dolby|j-?card|nakamichi)\b", re.I)
+# (a disc folder of a set: its side pictures are its own record's - "Disc1/side A", "LP 2/side B")
+_DISC_DIR = re.compile(r"^(?:cd|disc|disk|lp|record|vinyl)[ _-]*\d{1,2}\b", re.I)
+
+
+def rip_gear(notes) -> list:
+    """VIN-10: which parts of a record player the rip notes name on labelled lines
+    ("turntable", "tonearm", "cartridge", "phono stage")."""
+    return [what for what, rx in _GEAR_LINE if rx.search(str(notes or ""))]
+
+
+_SIDE_WORD = r"(?<![a-z])side[ _-]*([a-h])(?![a-z0-9])"
+
+
+def _side_pictures(album_dir) -> dict:
+    """The record sides the folder's pictures are named for ("side A.JPG", "_side B.jpg"), by the
+    disc folder they lie in ("" for any other folder: artwork/, scans/ are one record's set)."""
+    pics = {}
+    for dirpath, _d, fnames in os.walk(album_dir):
+        disc = next((part for part in Path(dirpath).relative_to(album_dir).parts if _DISC_DIR.match(part)), "")
+        for n in fnames:
+            m = re.search(_SIDE_WORD, Path(n).stem, re.I) if Path(n).suffix.lower() in IMAGE_EXT else None
+            if m:
+                pics.setdefault(disc.casefold(), set()).add(m.group(1).upper())
+    return pics
+
+
+def _image_names(album_dir) -> list:
+    out = []
+    for _dirpath, _d, fnames in os.walk(album_dir):
+        out += [n for n in fnames if Path(n).suffix.lower() in IMAGE_EXT]
+    return out
+
+
+def vinyl_sides(album_dir, audio_names, infos, notes="") -> int:
+    """VIN-10: how many sides of records the copy shows - side letters of its audio files' names
+    ("A1 ..."), its disc numbers ("A" .. "D"), its pictures of each side ("side A.JPG" ..
+    "side D.JPG") or its notes' lines ("Side A  EX / NM"): the most of these (0 when none). Sides
+    are counted per disc - by the files' disc numbers, the pictures' disc folders - and summed:
+    "Disc 1/side A, B" and "Disc 2/side A, B" are 4 sides."""
+    names = {}
+    for k, (p, i) in enumerate(infos):
+        n = Path(p).name if p else (audio_names[k] if k < len(audio_names) else "")
+        m = re.search(r"^([a-h])\d{1,2}(?=[ ._)-])", Path(n).stem, re.I) or re.search(_SIDE_WORD, Path(n).stem, re.I)
+        if m:
+            disc = i.get("disc_eff") or (str(i.get("disc_raw") or "").split("/")[0].strip() if
+                                         not _SIDE_DISC.match(str(i.get("disc_raw") or "")) else "") or 1
+            names.setdefault(str(disc), set()).add(m.group(1).upper())
+    if not infos:
+        for n in audio_names:
+            m = re.search(r"^([a-h])\d{1,2}(?=[ ._)-])", Path(n).stem, re.I) or re.search(_SIDE_WORD, Path(n).stem, re.I)
+            if m:
+                names.setdefault("1", set()).add(m.group(1).upper())
+    discs = {m.group(1).upper() for _p, i in infos for m in [_SIDE_DISC.match(str(i.get("disc_raw") or ""))] if m}
+    lines = {m.group(1).upper() for m in _SIDE_LINE.finditer(str(notes or ""))}
+    return max(sum(len(v) for v in names.values()), len(discs),
+               sum(len(v) for v in _side_pictures(album_dir).values()), len(lines))
+
+
+def vinyl_own_evidence(album_dir, audio_names, infos, notes="") -> str:
+    """VIN-10: why the copy's own evidence says it is a vinyl rip, whatever its folder is called,
+    or "". Strong alone: the rip notes naming two parts of a record player on labelled lines (a
+    turntable, tonearm, cartridge, phono stage: "TT: Clearaudio Emotion", "Cartridge: ..."), or
+    every file's source tag naming the record ("SOURCE=Vinyl", "SCOURCE=VINYL"). Weak, two of
+    them needed: one part of a record player alone, pictures of two sides or more ("side A.JPG"),
+    the notes' lines of three sides or more ("Side C  EX / NM"), every file's disc number a side letter ("A", "B2"),
+    every file's media or format tag naming the record (another tagger copies those from the
+    release it chose). A tape's word anywhere - the notes, the tags, a picture's name
+    ("cassette", "tape deck", "reel", "Dolby", "J-card", "Nakamichi") - says none of it."""
+    infos = [i for _p, i in infos]
+    tag_text = " ".join(str(i.get(k) or "") for i in infos
+                        for k in ("album", "media", "source_any", "comment_text"))
+    if _TAPE_WORD.search(str(notes or "")) or _TAPE_WORD.search(tag_text) or \
+            any(_TAPE_WORD.search(Path(n).stem.replace("_", " ")) for n in _image_names(album_dir)):
+        return ""
+    gear = rip_gear(notes)
+    if len(gear) >= 2:
+        return f"the rip notes name the {' and '.join(gear[:2])}"
+    if infos and all(i.get("source_vinyl") for i in infos):
+        return f"the files' source tag says {infos[0]['source_vinyl']}"
+    weak = []
+    if gear:
+        weak.append(f"the rip notes name the {gear[0]}")
+    pics = set().union(*_side_pictures(album_dir).values()) if _side_pictures(album_dir) else set()
+    lines = {m.group(1).upper() for m in _SIDE_LINE.finditer(str(notes or ""))}
+    if len(pics) >= 2:
+        weak.append(f"pictures of {len(pics)} vinyl sides")
+    elif len(lines) >= 3:
+        # (three sides at least: a tape's notes list sides A and B, and lyrics sheets do too)
+        weak.append(f"the rip notes list {len(lines)} vinyl sides")
+    if infos and all(_SIDE_DISC.match(str(i.get("disc_raw") or "")) for i in infos):
+        weak.append("disc numbers that are vinyl sides")
+    if infos and all(i.get("media_vinyl") or mc.media_kind(i.get("media")) == "vinyl" for i in infos):
+        weak.append("the media tags say vinyl")
+    return " and ".join(weak) if len(weak) >= 2 else ""
+
+
+def copy_vinyl(album_dir, files) -> str:
+    """VIN-10: "vinyl" when these files of ALBUM_DIR are a vinyl rip - by the folder name, the
+    ripper's word (MED-21) or the copy's own evidence (vinyl_own_evidence) - as the matcher read
+    the album (_media_hint), else "". For an album planned in parts, a version of a split or a
+    release you chose (the matcher's own reading is the whole album's or none)."""
+    album_dir = Path(album_dir)
+    files = [Path(f) for f in files or ()]
+    infos = [(f, read_file(f)) for f in files]
+    logs, _foreign = fitting_logs(infos, rip_logs(album_dir))
+    cd = any(log.get("toc") for log in logs) or audio_evidence([i for _p, i in infos])["cd_frames"]
+    hint, _why = _media_hint(album_dir, album_dir.name, files, infos, "", bool(cd), notes_text(album_dir), bool(cd))
+    audio = audio_evidence([i for _p, i in infos])
+    return "vinyl" if mc.record_copy({"media_hint": hint, "audio": audio, "rip_log_toc": bool(cd),
+                                      "folder": album_dir.name}) == "vinyl" else ""
+
+
 def _media_hint(album_dir, album_folder, files, infos, artist, rip_log, notes="", cd_said=False):
     """What the copy was made from, and what says so: the folder name first ("[Vinyl Rip]",
     "[2CD]"), then signs the files carry whatever the folder is called (R4). Vinyl signs
@@ -2807,6 +3016,13 @@ def _media_hint(album_dir, album_folder, files, infos, artist, rip_log, notes=""
             said = vinyl_rip_said(infos, notes)
             if said:
                 return "vinyl", said
+        # VIN-10: the copy's own evidence of a record ripped - a record player in the rip notes,
+        # a source tag naming the record, sides (pictures, disc numbers) beside another sign;
+        # never against a TOC or whole CD sectors
+        if not hint and not cd_said:
+            own = vinyl_own_evidence(album_dir, [p.name for p in files], infos, notes)
+            if own:
+                return "vinyl", own
     if hint or rip_log:
         return hint, ("folder name" if hint else "")
     shops = Counter(i.get("download_marker") for _p, i in infos if i.get("download_marker"))
@@ -6147,13 +6363,20 @@ def discogs_search(http, album, cfg, dm):
     hint = album.get("media_hint") or ""
     want = fetch_kinds(album)
     found_format = not want or any(want & set(c.get("formats") or ()) for c in out)
+    # (VIN-11: the pressing's year your folder names - "Tool - 2001 - Lateralus (2020)" - on none
+    # of these: the master's versions are read for it)
+    # (a record copy only - VIN-9's record_copy: for a CD the press year stays a preference, and
+    # never costs a fetch)
+    press = album.get("press_year") if mc.record_copy(album) else None
+    found_year = not press or any(str(c.get("year") or "")[:4] == str(press) for c in out)
+    year_only = bool(found_count and found_catno and found_format and not found_year)
     master = next((r.get("master_id") for r in results if r.get("master_id") and pre(r) >= 0.7), None)
     # a download among them: the master's listing tells whether it is the only one (R7)
     has_download = any(c.get("formats") == {"digital"} for c in out)
     data = None
-    if master and (has_download or not (found_count and found_catno and found_format)):
+    if master and (has_download or not (found_count and found_catno and found_format and found_year)):
         data = http.get_json(f"https://api.discogs.com/masters/{master}/versions?per_page=100", "discogs")
-    if master and not (found_count and found_catno and found_format):
+    if master and not (found_count and found_catno and found_format and found_year):
         have = {str(c["id"]) for c in out}
         versions = [v for v in (data or {}).get("versions", []) if str(v.get("id")) not in have]
         def vprio(v):
@@ -6179,6 +6402,9 @@ def discogs_search(http, album, cfg, dm):
                         or (hint and hint in (cand.get("formats") or ()))):
                     out.append(cand)
                 found = found or code
+                if year_only and str(cand.get("year") or "")[:4] == str(press) and \
+                        len(cand["tracks"]) == n_files and not cand.get("unofficial"):
+                    break                      # (VIN-11: the press year's official version found: enough)
     if master and not any(len(c["tracks"]) == n_files for c in out):
         # QRY-4: none of that master's versions has your track count (a same-titled single's or
         # compilation's master came first): the next master titled as your album too
@@ -10192,6 +10418,9 @@ def _process_album(row, http, cfg, dm, args, full_cfg, started):
                own_disproved=next((str(s["own_disproved"]) for res in (mb_res, dg_res)
                                    for s in (res or {}).get("scored") or () if s.get("own_disproved")), ""),
                margin=final.get("margin"), version=result_version(), checked=round(time.time()))
+    # VIN-10 / ED-5: what the copy itself is made from, by its own evidence (a vinyl rip: named so
+    # and never "[HD]", its pressing proven or not)
+    out["copy_media"] = "vinyl" if mc.record_copy(album) == "vinyl" else ""      # (never a CD rip of a "CD + LP" set)
     note_barcode_sources(out, album)
     note_gnudb(out, album, final)
     # (reporting only: what the scans showed about the pick, and how it was found)

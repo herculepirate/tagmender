@@ -2621,6 +2621,16 @@ class Engine:
                                                                     "discogs" if source == "discogs_preferred" else ""))
         if whole:
             scans_of(prop, self._last_out)     # (reporting only)
+            # VIN-10: the copy is a vinyl rip by its own evidence (the plan names it so, never "[HD]")
+            prop.copy_media = str((self._last_out or {}).get("copy_media") or "")
+        else:
+            # (VIN-10: a release you chose, a split's version, an album in parts - each read alone)
+            for p in [prop] + list(getattr(prop, "parts", None) or []):
+                if p.status == "identified" and p.files:
+                    try:
+                        p.copy_media = ma.copy_vinyl(p.source_dir, p.files)
+                    except Exception:
+                        p.copy_media = ""
         # (a set whose discs are different releases: each disc is its own album, _per_disc)
         for p in [prop] + list(getattr(prop, "parts", None) or []):
             self._finish(p, g)
@@ -7407,13 +7417,13 @@ class Engine:
                 mine = set(map(str, mine))
                 at = [i for i, f in enumerate(files) if f in mine]
                 got = marks.apply([out[i] for i in at], [files[i] for i in at], top, self.profile,
-                                  [prop.full_targets[i] for i in at])
+                                  [prop.full_targets[i] for i in at], getattr(prop, "copy_media", "") == "vinyl")
                 for i, t in zip(at, got):
                     out[i] = t
             prop.targets = out
         elif prop.status == "identified":
             prop.targets = marks.apply(prop.targets, prop.files, prop.source_dir, self.profile,
-                                       prop.full_targets)
+                                       prop.full_targets, getattr(prop, "copy_media", "") == "vinyl")
 
     def _band_members(self, mbid):
         """album_artist.band_members, asked once per artist in this run."""

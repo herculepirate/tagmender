@@ -432,10 +432,10 @@ def equipment(text: str) -> str:
     table = cart = ""
     for i, line in enumerate(lines):
         low = line.casefold()
-        m = re.match(r"^[\-*\s]*(turntable|deck|cartridge|cart|stylus)\s*:\s*(.+)$", line, re.I)
+        m = re.match(r"^[\-*\s]*(turntable|tt|deck|cartridge|cart|stylus)\s*:\s*(.+)$", line, re.I)
         if m:
             what, val = m.group(1).casefold(), m.group(2)
-            if what in ("turntable", "deck") and not table:
+            if what in ("turntable", "tt", "deck") and not table:
                 table = _short(val)
             elif what in ("cartridge", "cart") and not cart:
                 cart = _short(val)
@@ -552,6 +552,9 @@ def year_in_name(folder_name: str, pressing_year: str = "", original_year: str =
     return ""
 
 
+_CATNO_FORMAT_TAIL = re.compile(r"\s+[(\[]?(?:(?:[2-9]\s*x\s*|[2-9])?LP|EP|vinyl)[)\]]?\s*$", re.I)
+
+
 def describe(folder, files, catno: str = "", notes: str | None = None, comments=(), pressing_year: str = "",
              original_year: str = "", artist: str = "", parent_notes: str = "", scans: str | None = None) -> dict:
     """What tells this rip apart: {"resolution": (bits, rate) or (), "ripper", "version",
@@ -565,6 +568,9 @@ def describe(folder, files, catno: str = "", notes: str | None = None, comments=
     right after "Vinyl Rip" the notes, comment or scans name too, a signature the scans carry
     (watermark_ripper). The version: the ripper's own name for the transfer (version_of)."""
     folder = Path(str(folder)) if folder else None
+    # (VIN-3: a format word the database writes after the number - MusicBrainz's "61422-3116-1 LP" -
+    # is no part of it in the folder name: the bracket says "Vinyl Rip" already)
+    catno = _CATNO_FORMAT_TAIL.sub("", str(catno or "").strip()) or str(catno or "").strip()
     notes = notes_of(folder) if notes is None and folder else (notes or "")
     own = own_in(comments)
     said = "\n".join(dict.fromkeys("\n".join(ln for ln in re.split(r"\r?\n", str(c)) if not own_line(ln))

@@ -67,7 +67,8 @@ class R16_01_PicardPresetsDoubleTheEdition(EditionBase):
         for preset in want:
             p = self.plan([vinyl(1, "A"), vinyl(2, "B")], preset=preset, editions="edition_year",
                           album_editions="edition_year")
-            self.assertEqual(p["albums"][0]["files"][0]["changes"]["album"], ["I [2019 Vinyl Rip]"])
+            # (VIN-12: the Album tag names the rip as its folder does)
+            self.assertEqual(p["albums"][0]["files"][0]["changes"]["album"], ["I [2019 Vinyl Rip CAT 1]"])
             got[preset] = self.folders(p)[0]
         self.assertEqual(got, want)
 

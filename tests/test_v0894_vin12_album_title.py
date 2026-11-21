@@ -63,6 +63,12 @@ class VIN12_FolderFromTheTag(unittest.TestCase):
         self.assertEqual(ted.folder(t, "edition_year"), "2004 - I [2019 Vinyl Rip CAT 1]")   # (no details known now)
         t = dict(t, **{"~rip_catalog": ["CAT 1"], "~ripper": ["PBTHAL"]})
         self.assertEqual(ted.folder(t, "edition_year"), "2004 - I [2019 Vinyl Rip PBTHAL CAT 1]")
+        # (a catalogue number shaped like a resolution is kept; a second copy's resolution never named)
+        for tag, want in (("I [2019 Vinyl Rip MFSL 1-023]", "2004 - I [2019 Vinyl Rip MFSL 1-023]"),
+                          ("I [2019 Vinyl Rip PBTHAL MFSL 1-023]", "2004 - I [2019 Vinyl Rip PBTHAL MFSL 1-023]"),
+                          ("I [2019 Vinyl Rip LSP 1-1234 32-192]", "2004 - I [2019 Vinyl Rip LSP 1-1234]"),
+                          ("I [2019 Vinyl Rip CAT 1 copy 2]", "2004 - I [2019 Vinyl Rip CAT 1]")):
+            self.assertEqual(ted.folder(ted.tags(tag, "2004", "2019-03-01", '12" Vinyl'), "edition_year"), want, tag)
         # (a bracket of another's, with the resolution: not TagMender's - left as the title's)
         self.assertFalse(naming._own_rip_bracket("2019 Vinyl Rip 24bit 96khz CAT 1"))
         self.assertTrue(naming._own_rip_bracket("2019 Vinyl Rip SRM-1-1184 32-192"))

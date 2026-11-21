@@ -483,7 +483,7 @@ class Ctx:
                 t["album"] = [album] + list(t.get("album") or [])[1:]
                 fresh = folder_edition(t, mode_)
                 full = fresh if fresh != e and fresh.startswith(e + " ") else \
-                    re.sub(r" (?:\d+-\d+(?:\.\d)?|copy \d+)$", "", b_)
+                    re.sub(r" (?:(?:16|20|24|32)-(?:44\.1|48|88\.2|96|176\.4|192|352\.8|384)|copy \d+)$", "", b_)
                 for var in ("_edition", "_edition_kind", "_vinylrip"):
                     t[var] = [full]
                 own_full = True

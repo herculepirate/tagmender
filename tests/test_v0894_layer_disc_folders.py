@@ -182,7 +182,9 @@ class DSC17(m.Copies):
         def seen(base, *a, **k):
             bases.append(Path(base))
             return real(base, *a, **k)
-        with mock.patch.object(ma, "list_images", seen):
+        # (OCR counts as ready: GitHub's machines have no tesseract, and OCR that cannot work is off)
+        with mock.patch.object(ma, "ocr_problems", lambda: []), \
+                mock.patch.object(ma, "list_images", seen):
             self.check_one(self.plan_of(self.eng(ocr="on"), top))
         self.assertTrue(bases)
         self.assertEqual(set(bases), {top})

@@ -159,6 +159,9 @@ class Proposal:
     no_lengths_tie: bool = False
     # known_from_tags: no release fits; the files' own tags name the album (engine._known_from_own_tags)
     known_from_tags: bool = False
+    # DSC-20: the one year a set its own notes list is filed under (its parts' earliest), for the
+    # folder name only - each part's own date tag is kept; "" for any other album
+    set_year: str = ""
     # WEB-1: why the album is planned but held (unresolved.action "leave": a web album found
     # is shown, unticked, and applied only when you tick it); "" when it is not held
     held: str = ""
@@ -3071,6 +3074,13 @@ class Planner:
                     unheld = {k: v for k, v in whole.items() if v and (not tagio.holds(f, k) or
                                                                         (k in raw and k not in target))}
                     names = {**hidden, **merged, **unheld, **rel_tags}
+                    set_year = str(getattr(prop, "set_year", "") or "")
+                    if set_year:
+                        # DSC-20: a set whose parts carry their own years (1977 .. 1980) is named by
+                        # one, so its discs share one album folder - for the name only, never written
+                        for k_ in ("date", "originaldate", "originalyear"):
+                            if names.get(k_) or k_ == "date":
+                                names[k_] = [set_year]
                     # (numbers and totals as Picard names a file: the file's own fields with
                     # the track's over them, less what a script deleted - not as written)
                     inside_ = tagio.vorbis_totals(f)[0]     # (a Vorbis "5/9": no total, as Picard reads it)

@@ -7,9 +7,9 @@
 # Shapes from the library: that box (no disc tags, one disc's album artist "Billy Joel (Richard
 # Joo)"); John Mayer (BoxSet, 5CD, ...) (each disc tagged 01/01, one "John Mayer Trio");
 # Broselmaschine - It Was 50 Years Ago Today [5CD] (artist credited four ways). Guards: 7CD_Arvo
-# Part (discs II..X, numbers not 1..N), Joy Division - Complete Studio Recordings (a fan set: a
-# Bonus folder deeper, several artists), an artist's folder of numbered albums, a standalone
-# "1 of 1" release, a series' volumes in a folder that says no set.
+# Part (discs II..X, numbers not 1..N), Joy Division - Complete Studio Recordings without its
+# notes (a fan set: a Bonus folder deeper; with notes listing its parts it is one album, DSC-20),
+# an artist's folder of numbered albums, a standalone "1 of 1" release, a series' volumes in a folder that says no set.
 import shutil
 import sys
 from pathlib import Path
@@ -144,13 +144,25 @@ class DSC13_SaidSets(te.Base):
             disc(top, f"CD-{n:02d}", n, f"Band P {'I' * n}", "Band P")
         self.assertEqual(len(self.groups()), 3)
 
-    def test_DSC13_a_fan_set_with_a_deeper_bonus_folder_stays_apart(self):
-        # (Joy Division - Complete Studio Recordings (MRB-001 v1): sessions, then "Bonus/<date> - ...")
+    def test_DSC13_a_fan_set_with_a_deeper_bonus_folder_and_no_notes_stays_apart(self):
+        # (sessions, then "Bonus/<date> - ...": no one level of discs, and no notes of the set's
+        # listing its parts - DSC-20 joins it only on those)
         top = self.lib / "Band D - Complete Studio Recordings (MRB-001 v1)"
         disc(top, "01 - Demo session (1977)", 1, "Demo session", "Band D")
         disc(top, "02 - First session (1978)", 2, "First session", "Band D")
         disc(top / "Bonus", "1979-09-15 - TV Studios", 3, "TV Studios", "Band D")
         self.assertEqual(len(self.groups()), 3)
+
+    def test_DSC13_DSC20_the_same_fan_set_whose_notes_list_its_parts_is_one_album(self):
+        # (Joy Division - Complete Studio Recordings (MRB-001 v1): the compiler's notes at its root
+        # list every folder - DSC-20)
+        top = self.lib / "Band D - Complete Studio Recordings (MRB-001 v1)"
+        disc(top, "01 - Demo session (1977)", 1, "Demo session", "Band D")
+        disc(top, "02 - First session (1978)", 2, "First session", "Band D")
+        disc(top / "Bonus", "1979-09-15 - TV Studios", 3, "TV Studios", "Band D")
+        (top / (top.name + ".txt")).write_text("01 - Demo session (1977)\n02 - First session (1978)\n\n"
+                                               "BONUS\n1979-09-15 - TV Studios\n")
+        self.assertEqual(self.shape(), [(top.name, 9)])
 
     def test_DSC13_two_artists_stay_apart(self):
         top = self.lib / "Band D - Complete Studio Recordings"

@@ -1596,6 +1596,85 @@ def _other_audio(a, b, info) -> bool:
     return bool(ma_ and mb_ and ma_ != mb_)
 
 
+# DSC-20: a set's own notes - a text file at its root (.txt, .nfo, .md) - never a rip log, cue
+# sheet, DR or auCDtect report, checksum list or spectrogram note beside the audio
+_NOTES_EXT = (".txt", ".nfo", ".md")
+_NOT_NOTES = re.compile(r"foo_dr|\bdr\b|aucdtect|audiochecker|\blog\b|ripping|\beac\b|\bxld\b|"
+                        r"accurip|cuetools|ffp|md5|sfv|sha1|spectr|checksum", re.I)
+_LOG_TEXT = re.compile(r"Exact Audio Copy V|X Lossless Decoder version|foo_dr|auCDtect|"
+                       r"Dynamic Range Meter|Used drive", re.I)
+_DASHES = re.compile(r"[‐-―−﹘﹣－]")
+
+
+def noted_line(text) -> str:
+    """DSC-20: a line of a set's notes, or a folder's name, as the two are compared: case,
+    whitespace, dash kinds and trailing punctuation aside."""
+    t = unicodedata.normalize("NFKC", str(text or ""))
+    t = _DASHES.sub("-", t).casefold()
+    t = re.sub(r"\s+", " ", t).strip()
+    return re.sub(r"[\s.,;:!?]+$", "", t)
+
+
+def set_notes(folder) -> list:
+    """DSC-20: the notes files at FOLDER's root, each as its lines (noted_line), read tolerantly
+    (a cp1252 byte in a UTF-8 file is no reason to ignore it): [[line, ...], ...]."""
+    out = []
+    try:
+        names = sorted(os.listdir(folder))
+    except OSError:
+        return out
+    for n in names:
+        p = Path(folder) / n
+        if Path(n).suffix.lower() not in _NOTES_EXT or _NOT_NOTES.search(Path(n).stem) or not p.is_file():
+            continue
+        try:
+            if p.stat().st_size > 2_000_000:
+                continue
+            raw = p.read_bytes()
+        except OSError:
+            continue
+        try:
+            text = raw.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            text = raw.decode("cp1252", errors="replace")
+        if _LOG_TEXT.search(text[:4000]):
+            continue                                     # (a rip log or DR report, whatever its name)
+        out.append([noted_line(x) for x in text.splitlines()])
+    return out
+
+
+def noted_set_discs(folder, dirs) -> dict:
+    """DSC-20: {audio folder: its disc number} of a set whose own notes list its parts: a folder
+    whose name says it is a set (engine.says_box's words or a CD count) with no tracks of its own,
+    its audio folders DIRS each at its root or one level deeper beneath a folder holding no audio
+    ("Bonus/"), none a version folder, and one notes file at its root naming every audio folder by
+    its own name on a line of its own, each once: the discs numbered in the notes' order. {} when
+    any of that fails."""
+    from engine import says_box, box_cd_count         # (engine imports this module)
+    folder, dirs = Path(folder), sorted({Path(d) for d in dirs})
+    if len(dirs) < 2 or not (says_box(folder.name) or box_cd_count(folder.name)) or folder in dirs:
+        return {}
+    for d in dirs:
+        if d.parent != folder and not (d.parent.parent == folder and d.parent not in dirs):
+            return {}
+        if mc.version_layout(d.name):
+            return {}
+    names = {d: noted_line(d.name) for d in dirs}
+    if len(set(names.values())) != len(dirs) or not all(names.values()):
+        return {}
+    for lines in set_notes(folder):
+        at = {}
+        for d, n in names.items():
+            hits = [i for i, x in enumerate(lines) if x == n]
+            if len(hits) != 1:
+                break
+            at[d] = hits[0]
+        else:
+            order = sorted(dirs, key=lambda d: at[d])
+            return {d: i for i, d in enumerate(order, 1)}
+    return {}
+
+
 def _drop_duplicate_tracks(files, info):
     """The same track twice in one album - same title (or same name apart
     from the number) and the same length (within _SAME_AUDIO_S), in any folder
@@ -2327,6 +2406,14 @@ def read_album(album_dir, artist_folder, album_folder, exclude=(), blind=False):
     folders = sorted({p.parent for p in files if album_dir in p.parents},
                      key=lambda d: _natural_key(d.relative_to(album_dir).as_posix()))
     folder_disc = {d: i + 1 for i, d in enumerate(folders)} if len(folders) > 1 else {}
+    # DSC-20: a set whose own notes list its parts ("Joy Division - Complete Studio Recordings
+    # (MRB-001 v1)": 15 session folders, then "Bonus/<date> - ..."): each folder one disc, in the
+    # notes' order, whatever disc tag its files carry (a bonus folder's "1 of 1")
+    noted = noted_set_discs(album_dir, folders) if len(folders) > 1 else {}
+    if noted:
+        folder_disc = noted
+        for p, i in infos:
+            i["disc"] = 0
     # versions of the album in folders of their own ("2.0/", "5.0/": an SACD's stereo and
     # multichannel areas): each folder its own disc, whatever disc tag the files carry (each
     # version's files say disc 1)
@@ -2367,7 +2454,7 @@ def read_album(album_dir, artist_folder, album_folder, exclude=(), blind=False):
     # DSC-9: a set's volume folders ("Volume 1", "Volume II" in "Hits Volume I & II (2CD)"): the
     # volume is the disc, whatever disc tag its files carry (engine.volume_set joined them only where
     # their disc tags agree, or are no one numbering of the set: "1/2" beside an earlier job's "3/4")
-    vols = {} if versions else volume_discs(album_dir, folders)
+    vols = {} if versions or noted else volume_discs(album_dir, folders)
     if vols:
         folder_disc = vols
         for p, i in infos:
@@ -2378,7 +2465,7 @@ def read_album(album_dir, artist_folder, album_folder, exclude=(), blind=False):
             i["disc"] or folder_disc.get(p.parent) or tag_disc.get(p, 1)
     # DSC-18: albums ripped from fewer CDs than they are ("Seven Classic Albums [4CD]": 7 album
     # folders, 4 rip logs): each file is the track of the CD its place in the folders' order gives
-    split = None if versions else cd_split(album_dir, infos)
+    split = None if versions or noted else cd_split(album_dir, infos)
     if split:
         for p, i in infos:
             i["disc_eff"], i["num"] = split[p]

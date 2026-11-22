@@ -7234,6 +7234,7 @@ class Engine:
                              evidence=[f"the set's notes list its {len(noted)} folders"],
                              provenance={k: "your copy" for k in targets[0]} if targets else {},
                              release={"album": [title], "albumartist": [artist], "genre": [""]})
+        p.noted_set = True
         years = sorted({m[0] for f in files for k in ("originaldate", "date")
                         for m in [re.match(r"\s*((?:19|20)\d\d)", _first(ex.read_meta(f), k))] if m})
         if years:

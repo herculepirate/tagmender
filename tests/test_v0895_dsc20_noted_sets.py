@@ -129,6 +129,22 @@ class DSC20_NotedSets(te.Base):
         self.assertEqual((bonus["discnumber"], bonus["albumartist"]), (["4"], ["Band D"]))
         self.assertEqual(bonus["discsubtitle"], [BONUS[0]])
 
+    def test_DSC20_the_disc_subtitles_stay_when_a_tagger_script_runs(self):
+        # (a tagger script or a plugin's tag changes: a Partial album's fields are its level's
+        # Partial ones, but a noted set's disc subtitles are each part's own name)
+        noted_set(self.lib)
+        eng = self.engine(te.FakeHttp())
+        [g] = eng.albums_in(self.lib)
+        p = eng.identify(g)
+        prof = pf.from_dict({"name": "default", "providers": {"web": {"enabled": False}},
+                             "artwork": {"enabled": False}})
+        from unittest import mock
+        with mock.patch.object(pl.Planner, "_scripts", lambda self: ["$noop(x)"]):
+            [a] = pl.build([p], prof, "job", extra_roots=[self.lib])["albums"]
+        subs = {fe["changes"].get("discsubtitle", [""])[0] for fe in a["files"]}
+        self.assertIn("The Warsaw demo session (1977-07-18)", subs)
+        self.assertNotIn("", subs)
+
     def test_DSC20_applied_the_tags_say_one_album(self):
         top = noted_set(self.lib)
         eng = self.engine(te.FakeHttp())

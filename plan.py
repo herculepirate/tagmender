@@ -162,6 +162,9 @@ class Proposal:
     # DSC-20: the one year a set its own notes list is filed under (its parts' earliest), for the
     # folder name only - each part's own date tag is kept; "" for any other album
     set_year: str = ""
+    # DSC-20: a set its own notes list, proposed from your copy: its disc subtitles (each part
+    # folder's own name) are written though the album is Partial
+    noted_set: bool = False
     # WEB-1: why the album is planned but held (unresolved.action "leave": a web album found
     # is shown, unticked, and applied only when you tick it); "" when it is not held
     held: str = ""
@@ -2184,6 +2187,9 @@ class Planner:
             new["~remove"] = list(dict.fromkeys(remove))
         # (a field the level does not write: never written, whatever a script made of it)
         kept = _levels.restrict(new, self.profile, tier=getattr(self, "_album_tier", ""))
+        if getattr(self, "_noted_set", False) and new.get("discsubtitle") and \
+                _levels.restrict({"discsubtitle": new["discsubtitle"]}, self.profile).get("discsubtitle"):
+            kept["discsubtitle"] = new["discsubtitle"]   # (DSC-20: each part's own name, from your copy)
         for k in list(new):
             if k not in kept and not k.startswith("~"):
                 del new[k]
@@ -2377,6 +2383,7 @@ class Planner:
         # watcher and `tagmender unresolved` try it again. It is organised as before.
         album_only = prop.status == "identified" and tier_of(prop) == "album_only"
         self._album_tier = tier_of(prop)
+        self._noted_set = bool(getattr(prop, "noted_set", False))      # DSC-20
         import levels as _levels
         # (Partial or album only: the pressing is not proven, so neither is the files' own media
         # tag - no edition is read from it)

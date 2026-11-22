@@ -109,6 +109,8 @@ class DSC20_NotedSets(te.Base):
                           BONUS[0], BONUS[1]])
         for t in p.targets:          # (titles, artists, track numbers: the files' own; no IDs or label)
             self.assertFalse(set(t) - {"album", "albumartist", "discnumber", "totaldiscs", "discsubtitle"}, t)
+        eng.apply_level(p)           # (the level's cut: a Partial album's fields, its disc subtitles kept)
+        self.assertEqual(p.targets[0]["discsubtitle"], ["The Warsaw demo session (1977-07-18)"])
         # the plan: one album, each file's album and disc tags written, its title and artist kept
         prof = pf.from_dict({"name": "default", "providers": {"web": {"enabled": False}},
                              "artwork": {"enabled": False}})

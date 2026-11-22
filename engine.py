@@ -7546,6 +7546,12 @@ class Engine:
                                                   getattr(self, "_band_ids", None))
         prop.full_targets = [dict(t) for t in prop.targets or []]
         prop.targets = [levels.restrict(t, self.profile, tier=prop.tier) for t in prop.targets or []]
+        if getattr(prop, "noted_set", False):
+            # DSC-20: a set its own notes list keeps each part's disc subtitle (its folder's own name,
+            # from your copy) though it is Partial - where the level writes one
+            for t, full in zip(prop.targets, prop.full_targets):
+                if full.get("discsubtitle"):
+                    t.update(levels.restrict({"discsubtitle": full["discsubtitle"]}, self.profile))
         if prop.status == "identified" and getattr(prop, "one_release_folders", None) and \
                 len(prop.files or []) == len(prop.targets or []):
             # DSC-11: each album folder of the joined album takes the mark of its own copy (its

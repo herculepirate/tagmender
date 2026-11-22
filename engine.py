@@ -587,11 +587,17 @@ def noted_set_dirs(box: Path, found: dict, metas: dict) -> list:
     if box in found or not (says_box(box.name) or box_cd_count(box.name)):
         return []                                    # (the name first: most folders say no set)
     who = _folder_artist(box.name)
-    if not who or _artist_folder(box, who):
-        return []                                    # (no artist named; an artist's folder of albums)
+    if not who or _artist_folder(box, who) or _title_fold(who) in _VARIOUS or _COMPILATION_WORD.search(box.name):
+        return []                                    # (no artist named; an artist's folder; Various Artists)
     dirs = [d for d in found if box in d.parents]
     if not ma.noted_set_discs(box, dirs):
-        return []
+        return []                                    # (no notes naming every part; bare "CD1", "Disc 2")
+    for d in dirs:
+        for f in found[d]:
+            meta = metas.get(f) or {}
+            if _disc_tag(meta) == ("1", "1") and any(_first(meta, k) for k in ("musicbrainz_albumid", "barcode",
+                                                                                  "discogs_release_id")):
+                return []                            # (a standalone release's own disc 1 of 1, as DSC-13)
     def names(name, text):
         name = _title_fold(name)
         return bool(name) and re.search(rf"(?<!\w){re.escape(name)}(?!\w)", _title_fold(text)) is not None
@@ -611,6 +617,34 @@ def noted_set_dirs(box: Path, found: dict, metas: dict) -> list:
     if credited * 2 >= len(dirs):
         return []
     return sorted(dirs)
+
+
+def noted_set(box: Path, found: dict, metas: dict) -> list:
+    """DSC-20: the parts of a set its own notes list (noted_set_dirs) that no earlier rule takes as
+    its shape - DSC-5's numbered box, DSC-13's said set, DSC-9's volumes, DSC-18's CD split, a
+    titled box: those are what they were. The one test the grouping, the planning and
+    match_albums.read_album share; [] otherwise."""
+    got = noted_set_dirs(box, found, metas)
+    if not got or titled_box(box, found, metas) or volume_set(box, found, metas) or \
+            said_set_dirs(box, found, metas) or numbered_box(box, found, metas) or cd_split_box(box, found):
+        return []
+    return got
+
+
+def noted_set_order(box, files) -> dict:
+    """DSC-20: {part folder: disc number} when FILES (all the audio of BOX) are a set its own notes
+    list (noted_set), in the notes' order; {} otherwise. The cheap tests first: the name, the notes."""
+    box = Path(box)
+    if not (says_box(box.name) or box_cd_count(box.name)):
+        return {}
+    found = {}
+    for f in files:
+        found.setdefault(Path(f).parent, []).append(Path(f))
+    order = ma.noted_set_discs(box, list(found))
+    if not order:
+        return {}
+    metas = {f: ex.read_meta(f) for fs in found.values() for f in fs}
+    return order if noted_set(box, found, metas) else {}
 
 
 def _folder_artist(name) -> str:
@@ -1522,6 +1556,8 @@ class Group:
     discs: list = field(default_factory=list)
     # DSC-5: a box set's folder whose discs sit in folders of its own named as albums (numbered_box)
     box: bool = False
+    # DSC-20: the box is a set its own notes list, formed by noted_set (Engine._noted_set)
+    noted: bool = False
     # DSC-10: the albums of sibling folders that may be one set by its release, this one among
     # them (each planned alone first; Engine._release_set joins those a release proves one), the
     # folder holding them and their shape (release_set_shape). [] / None / "" otherwise.
@@ -2158,11 +2194,16 @@ def _group_unit(eng, path: Path, found: dict, sc: "_Scan", keys_out=None) -> lis
     # as an album of its own, every other sign agreeing (said_set)
     said = {}
     named = set()
+    noted = set()                                    # DSC-20: the sets its own notes list (noted_set)
     for b in parents:
         if titled_box(b, found, metas) or volume_set(b, found, metas):
             named.add(b)
         else:
-            got = said_set_dirs(b, found, metas) or noted_set_dirs(b, found, metas)      # DSC-13, DSC-20
+            got = said_set_dirs(b, found, metas)                                         # DSC-13
+            if not got:
+                got = noted_set(b, found, metas)                                         # DSC-20
+                if got:
+                    noted.add(b)
             if got:
                 named.add(b)
                 said[b] = set(got)                   # (DSC-13: a stray album beside the box stays its own)
@@ -2171,9 +2212,10 @@ def _group_unit(eng, path: Path, found: dict, sc: "_Scan", keys_out=None) -> lis
     for b in {d.parent.parent for d in found if d.parent.parent != d.parent}:
         if b in parents or b in named or not (b == path or path in b.parents):
             continue
-        got = noted_set_dirs(b, found, metas)
+        got = noted_set(b, found, metas)
         if got:
             named.add(b)
+            noted.add(b)
             said[b] = set(got)
     for box in sorted(near | named, key=lambda a: len(a.parts)):
         if any(b in box.parents for b in whole_boxes) or not (
@@ -2239,7 +2281,8 @@ def _group_unit(eng, path: Path, found: dict, sc: "_Scan", keys_out=None) -> lis
                     g.siblings, g.set_folder, g.set_shape = mine, folder, "albums"
             continue
         if len(by_album) == 1:
-            groups.append(Group(folder, files, [], single=len(files) == 1, box=folder in whole_boxes))
+            groups.append(Group(folder, files, [], single=len(files) == 1, box=folder in whole_boxes,
+                                noted=folder in whole_boxes and folder in noted))
             continue
         for key, members in by_album.items():            # a mixed folder: one group per album
             others = [f for f in files if f not in members]
@@ -4236,11 +4279,6 @@ class Engine:
             # Partial, web, fingerprint or disc-by-disc answer is looked for)
             return planmod.Proposal(**base, status="unresolved", tier="unresolved", reason_codes=["other"],
                                     reason="set search: no release proven for the whole set")
-        if noted and not (out and out.get("album_only") and out.get("best")):
-            # DSC-20: no release fits the set its own notes list: it is proposed from your copy
-            p = self._noted_proposal(g, noted, files, base, out, errors)
-            if p is not None:
-                return p
         cv = ((out or {}).get("best") or {}).get("copy_version") if out and out.get("status") != "auto" else ""
         if cv:
             # your copy names a version (an instrumental album) no release found is: held, never
@@ -4329,6 +4367,13 @@ class Engine:
                 if hold:
                     p.held = (f"held: found on {p.provider.split(':', 1)[-1]}, but Unresolved is set to "
                               f"\"leave\" in this profile: nothing is written unless you tick it and apply")
+                return p
+        if noted:
+            # DSC-20: nothing the databases or the web gave is usable for the set its own notes list
+            # (no candidate, or none established - a Partial, a review's hold or a web album went
+            # its own way above): it is proposed from your copy, never taken apart disc by disc
+            p = self._noted_proposal(g, noted, files, base, out, errors)
+            if p is not None:
                 return p
         # titles twice, once with a version's mark ("Twilight" and "Twilight (Remix 2024)"),
         # in a folder no release and no web album fits: two versions of the album rather than
@@ -7177,18 +7222,12 @@ class Engine:
                                                          f"the album's own title \"{base}\" written"]
 
     def _noted_set(self, g: Group) -> dict:
-        """DSC-20: {audio folder: disc number} when G is a set whose own notes list its parts
-        (noted_set_dirs, on G's own files), else {}."""
-        if not getattr(g, "box", False) or len({Path(f).parent for f in g.files}) < 2:
-            return {}
+        """DSC-20: {audio folder: disc number} when G is a set whose own notes list its parts - a
+        group the grouping formed by noted_set, still one on its own files (noted_set_order) - else {}."""
+        if not (getattr(g, "box", False) and getattr(g, "noted", False)) or len({Path(f).parent for f in g.files}) < 2:
+            return {}                                     # (only a group noted_set formed)
         try:
-            found = {}
-            for f in g.files:
-                found.setdefault(Path(f).parent, []).append(Path(f))
-            metas = {f: ex.read_meta(f) for fs in found.values() for f in fs}
-            if not noted_set_dirs(Path(g.folder), found, metas):
-                return {}
-            return ma.noted_set_discs(g.folder, list(found))
+            return noted_set_order(Path(g.folder), g.files)
         except Exception as exc:                          # (never a set on what could not be read)
             self.log.warning("set notes of %s: %s", g.folder, exc)
             return {}
@@ -7211,7 +7250,7 @@ class Engine:
         if not (artist and title):
             return None
         total = str(len(noted))
-        targets = []
+        targets, years = [], set()
         for f in files:
             d = Path(f).parent
             if d not in noted:
@@ -7223,7 +7262,9 @@ class Engine:
             # (one album artist, written here: a part's compilation flag - COMPILATION, TCMP, cpil, and
             # the ITUNESCOMPILATION / COMP a free-form tag may carry - goes, or a player splits the set
             # or calls it Various Artists)
-            meta = ex.read_meta(f)
+            meta = ex.read_meta(f)                        # (each file's tags read once)
+            years |= {m[0] for k in ("originaldate", "date")
+                      for m in [re.match(r"\s*((?:19|20)\d\d)", _first(meta, k))] if m}
             flags = [k for k in ("compilation",) + compilations.EXTRA_FLAGS if _first(meta, k)]
             if flags:
                 t["~remove"] = list(dict.fromkeys(["compilation"] + flags))
@@ -7243,8 +7284,7 @@ class Engine:
                              provenance={k: "your copy" for k in targets[0]} if targets else {},
                              release={"album": [title], "albumartist": [artist], "genre": [""]})
         p.noted_set = True
-        years = sorted({m[0] for f in files for k in ("originaldate", "date")
-                        for m in [re.match(r"\s*((?:19|20)\d\d)", _first(ex.read_meta(f), k))] if m})
+        years = sorted(years)
         if years:
             # (each part carries its own year: one names the set's folder, so its discs stay together)
             p.set_year = years[0]

@@ -298,6 +298,83 @@ class DSC20_NotedSets(te.Base):
         noted_set(self.lib, name="Band D - Studio Sessions (MRB-001 v1)")
         self.assertGreater(len(self.groups()), 3)
 
+    def test_DSC20_a_plain_2cd_album_with_a_tracklist_nfo_is_no_noted_set(self):
+        # (review: "Band P - Pulse (2CD)/CD1", "/CD2" tagged "Pulse" 1/2 and 2/2, an .nfo whose
+        # tracklist headers are "CD1" and "CD2": a bare disc name is no part a set's notes list -
+        # never album "Pulse (2CD)" with disc subtitles "CD1" written over its tags)
+        top = self.lib / "Band P" / "Band P - Pulse (2CD)"
+        part(top, "CD1", 1, "Pulse", "Band P", "Band P", disc_tag="1/2")
+        part(top, "CD2", 2, "Pulse", "Band P", "Band P", disc_tag="2/2")
+        (top / "Band P - Pulse.nfo").write_text("Band P - Pulse\n\nCD1\n01. D1-0\n\nCD2\n01. D2-0\n")
+        eng = self.engine(te.FakeHttp())
+        [g] = eng.albums_in(self.lib)
+        self.assertEqual((g.folder, g.noted), (top, False))
+        self.assertEqual(ma.noted_set_discs(top, [top / "CD1", top / "CD2"]), {})
+        p = eng.identify(g)
+        self.assertNotIn("DSC-20", p.reason or "")
+        self.assertFalse(p.noted_set)
+        self.assertFalse(any(t.get("discsubtitle") or t.get("album") == ["Pulse (2CD)"] for t in p.targets))
+
+    def test_DSC20_a_various_artists_box_with_notes_is_no_noted_set(self):
+        # (review: "Various Artists - Party Box Set" whose info.txt lists its folders: no one artist
+        # named - its compilation flags stay)
+        top = self.lib / "Various Artists - Party Box Set"
+        names = ("01 - Summer Party", "02 - Winter Party")
+        for n, d in enumerate(names, 1):
+            part(top, d, n, "Party Box", "Some Act", "Various Artists")
+        (top / "info.txt").write_text("\n".join(names) + "\n")
+        found = {top / d: sorted((top / d).glob("*.flac")) for d in names}
+        self.assertEqual(engine.noted_set_dirs(top, found, {}), [])
+        for g in self.groups():
+            self.assertFalse(g.noted)
+            p = self.engine(te.FakeHttp()).identify(g)
+            self.assertFalse(p.noted_set)
+            self.assertNotIn("DSC-20", p.reason or "")
+
+    def test_DSC20_standalone_albums_with_release_ids_stay_apart(self):
+        # (review: "Band Q - Discografia Completa (3CD)", "1990 - Alpha" .. each tagged disc 1 of 1
+        # with its own release ID, a readme listing the folders: each its own release, as DSC-13)
+        top = self.lib / "Band Q - Discografia Completa (3CD)"
+        names = ("1990 - Alpha", "1993 - Beta", "1996 - Gamma")
+        for n, d in enumerate(names, 1):
+            for i in range(3):
+                flac(top / d, f"{i + 1:02d}.flac", 10 * (i + 1), freq=300 + 100 * n + 10 * i, title=f"D{n}-{i}",
+                     album=d[7:], artist="Band Q", albumartist="Band Q", track=str(i + 1), disc="1/1",
+                     musicbrainz_albumid=f"id-{n}")
+        (top / "readme.txt").write_text("Band Q discography\n\n" + "\n".join(names) + "\n")
+        self.assertEqual(sorted(g.folder.name for g in self.groups()), list(names))
+        self.assertEqual(engine.noted_set_order(top, sorted(top.rglob("*.flac"))), {})
+
+    def test_DSC20_read_album_keeps_disc_tags_where_the_set_is_no_noted_set(self):
+        # (a box-named folder with notes naming bare disc folders: its own disc tags and DSC-9/DSC-18
+        # read as before, never renumbered by notes the grouping would not take)
+        top = self.lib / "Band P" / "Band P - Pulse Box Set"
+        part(top, "CD1", 1, "Pulse", "Band P", "Band P", disc_tag="2/2")
+        part(top, "CD2", 2, "Pulse", "Band P", "Band P", disc_tag="1/2")
+        (top / "notes.txt").write_text("CD1\nCD2\n")
+        album = ma.read_album(top, "Band P", top.name)
+        self.assertEqual([t["disc"] for t in album["tracks"]][::3], [1, 2])     # (its tags: CD2 is disc 1)
+        self.assertEqual({Path(t["path"]).parent.name for t in album["tracks"] if t["disc"] == 1}, {"CD2"})
+
+    def test_DSC20_a_database_answer_goes_its_own_way(self):
+        # (a Partial the databases establish wins over the copy's own proposal: DSC-20 only where
+        # nothing they gave is usable)
+        noted_set(self.lib)
+        eng = self.engine(te.FakeHttp())
+        [g] = eng.albums_in(self.lib)
+        self.assertTrue(g.noted)
+        from unittest import mock
+        db = pl.Proposal(source_dir=str(g.folder), files=[str(f) for f in g.files],
+                         targets=[{"album": ["From the database"]} for _ in g.files], tier="partial",
+                         reason="album established, release not proven")
+        best = {"source": "mb", "id": "mb-x", "confidence": 70.0, "title": "From the database"}
+        with mock.patch.object(engine.ma, "process", lambda *a, **k: {"status": "review", "best": best,
+                                                                      "why": ["confidence 70 < 90"]}), \
+                mock.patch.object(engine.Engine, "_partial", lambda self, *a, **k: db):
+            p = eng.identify(g)
+        self.assertEqual(p.targets[0]["album"], ["From the database"])
+        self.assertFalse(p.noted_set)
+
     def test_DSC20_a_release_of_its_discs_still_wins(self):
         top = noted_set(self.lib)
         rel = box_release("mb-set", "Band D", "Complete Studio Recordings", 5, video=False)

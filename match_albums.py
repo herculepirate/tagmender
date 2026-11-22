@@ -1605,6 +1605,11 @@ _LOG_TEXT = re.compile(r"Exact Audio Copy V|X Lossless Decoder version|foo_dr|au
                        r"Dynamic Range Meter|Used drive", re.I)
 _DASHES = re.compile(r"[‐-―−﹘﹣－]")
 
+# DSC-20: a folder named only by a disc word and its number ("CD1", "Disc 2", "CD-01", "02"): a
+# notes line naming it is any tracklist's header, never the set's own list of its parts
+_BARE_DISC = re.compile(r"^(?:(?:cd|disc|disk|dvd|sacd|bd|lp|part|pt|vol|volume|side)\s*[-_.#]?\s*)?"
+                        r"(?:\d{1,3}|[ivx]{1,5}|[a-d])$", re.I)
+
 
 def noted_line(text) -> str:
     """DSC-20: a line of a set's notes, or a folder's name, as the two are compared: case,
@@ -1662,6 +1667,8 @@ def noted_set_discs(folder, dirs) -> dict:
     names = {d: noted_line(d.name) for d in dirs}
     if len(set(names.values())) != len(dirs) or not all(names.values()):
         return {}
+    if any(_BARE_DISC.match(n) for n in names.values()):
+        return {}                                    # ("CD1", "Disc 2": a tracklist's headers name no part)
     for lines in set_notes(folder):
         at = {}
         for d, n in names.items():
@@ -2409,7 +2416,11 @@ def read_album(album_dir, artist_folder, album_folder, exclude=(), blind=False):
     # DSC-20: a set whose own notes list its parts ("Joy Division - Complete Studio Recordings
     # (MRB-001 v1)": 15 session folders, then "Bonus/<date> - ..."): each folder one disc, in the
     # notes' order, whatever disc tag its files carry (a bonus folder's "1 of 1")
-    noted = noted_set_discs(album_dir, folders) if len(folders) > 1 else {}
+    if len(folders) > 1:
+        from engine import noted_set_order            # (engine imports this module)
+        noted = noted_set_order(album_dir, [p for p in files if album_dir in p.parents])
+    else:
+        noted = {}
     if noted:
         folder_disc = noted
         for p, i in infos:

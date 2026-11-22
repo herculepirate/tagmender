@@ -1,5 +1,12 @@
 # Release notes
 
+## 0.8.95
+
+**A set its own notes list is one album**
+- A folder that names itself a set ("Complete Studio Recordings", "Box Set", "[5CD]") and whose own notes file lists every one of its folders is now one album, one row, even with parts one folder deeper ("Bonus/") and parts credited to the band's earlier name. Joy Division - Complete Studio Recordings (MRB-001 v1), a fan compilation of 15 sessions and 4 bonus folders, showed as some 20 albums; it is now one album of 19 discs in the order its notes give.
+- When no database lists the set, it is written from your copy: the set's name as its folder gives it, its album artist, each disc's number of the total and its title from its folder ("The Warsaw demo session (1977-07-18)"), the compilation flag removed. Track titles, track artists and dates stay as they are; no database fields are written, and the album is marked Partial. Filed, it is one album folder named with its earliest year: the notes at its root, each part's cue sheet, reports and artwork with its disc.
+- Not taken for such a set: a plain 2CD album whose notes list "CD1" and "CD2", a Various Artists box, and a folder of separate albums each tagged with its own release ID or barcode. A release a database finds always comes first.
+
 ## 0.8.94
 
 **Two rips of one record are two albums in your player**

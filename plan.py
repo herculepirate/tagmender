@@ -2190,6 +2190,12 @@ class Planner:
         if getattr(self, "_noted_set", False) and new.get("discsubtitle") and \
                 _levels.restrict({"discsubtitle": new["discsubtitle"]}, self.profile).get("discsubtitle"):
             kept["discsubtitle"] = new["discsubtitle"]   # (DSC-20: each part's own name, from your copy)
+        if getattr(self, "_noted_set", False) and new.get("~remove"):
+            # (DSC-20: and the compilation flags it removes - the set has one album artist)
+            flags = ("compilation", "itunescompilation", "comp")
+            gone = [x for x in new["~remove"] if str(x).lower() in flags]
+            if gone and _levels.restrict({"compilation": ["1"]}, self.profile).get("compilation"):
+                kept["~remove"] = list(dict.fromkeys(list(kept.get("~remove") or []) + gone))
         for k in list(new):
             if k not in kept and not k.startswith("~"):
                 del new[k]

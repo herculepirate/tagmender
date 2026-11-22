@@ -147,6 +147,33 @@ class DSC20_NotedSets(te.Base):
         self.assertIn("The Warsaw demo session (1977-07-18)", subs)
         self.assertNotIn("", subs)
 
+    def test_DSC20_a_parts_compilation_flag_goes(self):
+        # (Joy Division's "08 - Piccadilly Radio session": compilation=1 on one part of the set - one
+        # album artist, written by the set itself: the flag, and its free-form twins, go)
+        top = noted_set(self.lib)
+        flagged = sorted((top / SESSIONS[2]).glob("*.flac"))
+        for f in flagged:
+            tagio.write(f, {"compilation": ["1"], "itunescompilation": ["1"]})
+        eng = self.engine(te.FakeHttp())
+        [g] = eng.albums_in(self.lib)
+        p = eng.identify(g)
+        eng.apply_level(p)
+        prof = pf.from_dict({"name": "default", "providers": {"web": {"enabled": False}},
+                             "artwork": {"enabled": False}})
+        plan = pl.build([p], prof, "job", extra_roots=[self.lib])
+        [a] = plan["albums"]
+        by = {fe["src"]: fe["changes"] for fe in a["files"]}
+        self.assertIsNone(by[str(flagged[0])].get("compilation", "kept"), by[str(flagged[0])])
+        self.assertIsNone(by[str(flagged[0])].get("itunescompilation", "kept"))
+        self.assertNotIn("compilation", by[str(top / SESSIONS[0] / "01.flac")])   # (none there: nothing to do)
+        import executor
+        res = executor.Executor(plan).run()
+        self.assertEqual([r["status"] for r in res["albums"]], ["done"], res)
+        tags = tagio.read(flagged[1])
+        self.assertFalse(tags.get("compilation"), tags)
+        self.assertFalse(tags.get("itunescompilation"), tags)
+        self.assertEqual(tags["albumartist"], ["Band D"])
+
     def test_DSC20_applied_the_tags_say_one_album(self):
         top = noted_set(self.lib)
         eng = self.engine(te.FakeHttp())
@@ -185,6 +212,40 @@ class DSC20_NotedSets(te.Base):
                          [f"Disc {n:02d}" for n in range(1, 6)])
         dated = [fe for fe in a["files"] if Path(fe["src"]).parent.name == SESSIONS[2]]
         self.assertNotIn("date", dated[0]["changes"])           # (each part's own date tag kept)
+
+    def test_DSC20_filed_the_notes_go_to_the_album_and_each_parts_papers_to_its_disc(self):
+        # (the set's notes at the album's root; each part's cue sheet, DR and auCDtect reports, its
+        # info and artwork/ beside its own disc - nothing left behind)
+        top = noted_set(self.lib)
+        (top / f"{SET}.pdf").write_bytes(b"%PDF-1.4\n")
+        (top / SESSIONS[0] / "Folder.auCDtect.txt").write_text("auCDtect\n")
+        (top / SESSIONS[2] / "Info.txt").write_text("session notes\n")
+        (top / "Bonus" / BONUS[1] / "+Rehearsals.cue").write_text(
+            'FILE "01.flac" WAVE\n  TRACK 01 AUDIO\n    INDEX 01 00:00:00\n')
+        eng = self.engine(te.FakeHttp())
+        [g] = eng.albums_in(self.lib)
+        p = eng.identify(g)
+        dest = self.tmp / "filed"
+        dest.mkdir()
+        prof = pf.from_dict({"name": "default", "operation": "move", "destination": str(dest),
+                             "providers": {"web": {"enabled": False}}, "artwork": {"enabled": False}})
+        plan = pl.build([p], prof, "job", extra_roots=[self.lib], file_anyway=True)
+        [a] = plan["albums"]
+        home = {Path(fe["dst"]).parent.parent for fe in a["files"]}.pop()
+        where = {str(Path(c["src"]).relative_to(top)): str(Path(c["dst"]).relative_to(home)) for c in a["companions"]}
+        self.assertEqual(where[f"{SET}.txt"], f"{SET}.txt")
+        self.assertEqual(where[f"{SET}.pdf"], f"{SET}.pdf")
+        self.assertEqual(where[f"{SESSIONS[0]}/foo_dr.txt"], "Disc 01/foo_dr.txt")
+        self.assertEqual(where[f"{SESSIONS[0]}/Folder.auCDtect.txt"], "Disc 01/Folder.auCDtect.txt")
+        self.assertEqual(where[f"{SESSIONS[1]}/artwork/front.jpg"], "Disc 02/artwork/front.jpg")
+        self.assertEqual(where[f"{SESSIONS[2]}/Info.txt"], "Disc 03/Info.txt")
+        self.assertEqual(where[f"Bonus/{BONUS[1]}/+Rehearsals.cue"], "Disc 05/+Rehearsals.cue")
+        import executor
+        res = executor.Executor(plan).run()
+        self.assertEqual([r["status"] for r in res["albums"]], ["done"], res)
+        self.assertEqual([f for f in top.rglob("*") if f.is_file()] if top.exists() else [], [])
+        self.assertTrue((home / f"{SET}.txt").is_file())
+        self.assertTrue((home / "Disc 05" / "+Rehearsals.cue").is_file())
 
     # ---- the guards -------------------------------------------------------------------------
     def test_DSC20_no_notes_stays_apart(self):

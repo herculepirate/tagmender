@@ -7218,8 +7218,16 @@ class Engine:
                 return None
             sub = re.sub(r"^\s*(?:(?:cd|disc|disk|part)\s*[-_.]?\s*)?\d{1,3}(?!\d)\s*(?:[-.–_)]\s*)*",
                          "", d.name, flags=re.I).strip() or d.name
-            targets.append({"album": [title], "albumartist": [artist], "discnumber": [str(noted[d])],
-                            "totaldiscs": [total], "discsubtitle": [sub]})
+            t = {"album": [title], "albumartist": [artist], "discnumber": [str(noted[d])],
+                 "totaldiscs": [total], "discsubtitle": [sub]}
+            # (one album artist, written here: a part's compilation flag - COMPILATION, TCMP, cpil, and
+            # the ITUNESCOMPILATION / COMP a free-form tag may carry - goes, or a player splits the set
+            # or calls it Various Artists)
+            meta = ex.read_meta(f)
+            flags = [k for k in ("compilation",) + compilations.EXTRA_FLAGS if _first(meta, k)]
+            if flags:
+                t["~remove"] = list(dict.fromkeys(["compilation"] + flags))
+            targets.append(t)
         words = "a set its own notes list: no release fits, written from your copy (DSC-20)"
         why = [words, f"{len(noted)} parts, each one disc in the order the set's notes list them; titles, "
                       "track artists and track numbers kept as your files have them; no release IDs, label, "
@@ -7552,6 +7560,11 @@ class Engine:
             for t, full in zip(prop.targets, prop.full_targets):
                 if full.get("discsubtitle"):
                     t.update(levels.restrict({"discsubtitle": full["discsubtitle"]}, self.profile))
+                # (and the compilation flags it removes, where the level writes the flag)
+                gone = [x for x in full.get("~remove") or () if str(x).lower() in ("compilation",)
+                        + compilations.EXTRA_FLAGS]
+                if gone and levels.restrict({"compilation": ["1"]}, self.profile).get("compilation"):
+                    t["~remove"] = list(dict.fromkeys(list(t.get("~remove") or []) + gone))
         if prop.status == "identified" and getattr(prop, "one_release_folders", None) and \
                 len(prop.files or []) == len(prop.targets or []):
             # DSC-11: each album folder of the joined album takes the mark of its own copy (its

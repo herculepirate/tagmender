@@ -1,5 +1,11 @@
 # Release notes
 
+## 0.8.96
+
+**A box's disc folders are one album, also with a disc missing**
+- Disc folders named by their catalogue numbers - "COCY 9329 unknown pleasures" .. "COCY 9332 substance" - each with its rip log are now read together, so their disc IDs can show they are one release. Joy Division's 1977-1980 (COCY 93 29-32) was four rows, each disc matched correctly on its own; it is now one album.
+- Discs 1 to 4 of a five-disc release (its last disc, a single, not ripped) are one album of it, the missing disc noted, when each folder's own disc ID is on that release at its place and the folder's name names the release (its title, or for a title of years like "1977–1980" its year, label or catalogue number) or says it is a set. Albums whose discs were also issued in a box, in a folder that names no box, stay the albums they are.
+
 ## 0.8.95
 
 **A set its own notes list is one album**

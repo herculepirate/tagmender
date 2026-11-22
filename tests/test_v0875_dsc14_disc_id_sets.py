@@ -7,6 +7,7 @@
 # more discs, a disc at another place, or MusicBrainz not answering: each folder stays alone.
 # Stubbed HTTP, no network.
 import shutil
+from unittest import mock
 import sys
 from pathlib import Path
 
@@ -120,6 +121,42 @@ class DSC14_DiscIdSets(te.Base):
                  for f in a["files"]]
         self.assertEqual(sorted(set(discs)), sorted({(f"Disc {k}", str(k)) for k in range(1, N + 1)}))
 
+    def test_DSC14_disc_folders_named_by_catalogue_number_are_read_and_joined_together(self):
+        # (Joy Division - 1977-1980 (COCY 93 29-32): "COCY 9329 unknown pleasures" .. "COCY 9332
+        # substance", each "1 of 1" with its EAC log - names neither numbered first nor disc words,
+        # so the scan read each folder as a piece of its own and the four discs were four rows)
+        top = self.lib / "1977-1980 (BQ 93 01-04)"
+        for k, name in enumerate(("BQ 9301 alpha", "BQ 9302 beta", "BQ 9303 gamma", "BQ 9304 delta"), 1):
+            d = top / name
+            for i in range(3):
+                flac(d, f"{i + 1:02d}.flac", 10 * (i + 1), freq=300 + 37 * k + 10 * i, title=f"D{k}-{i}",
+                     album=name.split()[-1], albumartist="Band Q", artist="Band Q", track=str(i + 1), disc="1/1")
+            (d / f"{name}.log").write_text(log_text(k))
+        gs = engine.Engine.albums_in(self.engine(te.FakeHttp()), self.lib)
+        self.assertEqual({g.set_shape for g in gs}, {"discids"}, [(g.folder.name, g.set_shape) for g in gs])
+        on = {k: [("mb-set", k, 4)] for k in range(1, 5)}
+        http = DiscIdHttp(on, mb=[the_set("mb-set", n=4)])
+        _eng, plan = self.plan_of(http, self.lib)
+        self.assertEqual(len(plan["albums"]), 1, [a.get("status") for a in plan["albums"]])
+        a = plan["albums"][0]
+        self.assertEqual((a["identification"]["release_id"], len(a["files"])), ("mb-set", 12))
+
+    def test_DSC14_folders_without_a_log_each_stay_a_piece_of_their_own(self):
+        lib = self.lib / "Band Q"
+        names = ["BQ 9301 alpha", "BQ 9302 beta"]
+        for name in names + ["Alpha", "Beta"]:
+            flac(lib / name, "01.flac", 10, title=name, album=name, albumartist="Band Q", artist="Band Q", track="1")
+        (lib / names[0] / "rip.log").write_text("x")
+        self.assertFalse(engine._rip_logged_kids(lib, names))
+        (lib / names[1] / "rip.log").write_text("x")
+        self.assertTrue(engine._rip_logged_kids(lib, names))
+        self.assertFalse(engine._rip_logged_kids(lib, names[:1]))
+        # (an artist's folder of albums, each with its log: no catalogue series in the names)
+        (lib / "Alpha" / "rip.log").write_text("x")
+        (lib / "Beta" / "rip.log").write_text("x")
+        self.assertFalse(engine._rip_logged_kids(lib, ["Alpha", "Beta"]))
+        self.assertFalse(engine._rip_logged_kids(lib, ["BQ 9301 alpha", "XY 9302 beta"]))
+
     def test_DSC14_standalone_albums_also_boxed_stay_apart(self):
         # (each disc's ID on the box AND on a one-disc release of its own album's title, the folder
         # saying no set: the standalone albums they are - never the box)
@@ -169,10 +206,82 @@ class DSC14_DiscIdSets(te.Base):
         _eng, plan = self.plan_of(DiscIdHttp(on), top)
         self.assertEqual(len(plan["albums"]), 3)
 
-    def test_DSC14_a_release_of_more_discs_than_the_folders_keeps_each_alone(self):
+    def test_DSC14_a_release_of_more_discs_not_matched_keeps_each_alone(self):
+        # (DSC-14c: discs 1 to 3 of a 4-disc release the joined album is not matched to: apart)
         top = sessions(self.lib, n=3)
         on = {k: [("mb-set", k, 4)] for k in range(1, 4)}
         _eng, plan = self.plan_of(DiscIdHttp(on), top)
+        self.assertEqual(len(plan["albums"]), 3)
+
+    def _series(self, parent, titles=("alpha", "beta", "gamma")):
+        """Folders "BQ 9301 alpha" .. of PARENT, each its own album "1 of 1" with its XLD log."""
+        top = self.lib / parent
+        for k, t in enumerate(titles, 1):
+            d = top / f"BQ 930{k} {t}"
+            for i in range(3):
+                flac(d, f"{i + 1:02d}.flac", 10 * (i + 1), freq=300 + 37 * k + 10 * i, title=f"D{k}-{i}",
+                     album=t.title(), albumartist="Band Q", artist="Band Q", track=str(i + 1), disc="1/1")
+            (d / f"{t}.log").write_text(log_text(k))
+        return top
+
+    def test_DSC14c_discs_one_to_n_of_a_bigger_release_are_one_album_of_it(self):
+        # (Joy Division - 1977-1980 (COCY 93 29-32): "COCY 9329 unknown pleasures" .. "COCY 9332
+        # substance", discs 1 to 4 of the 5-disc JP box by their exact disc IDs, its disc 5 - the
+        # Atmosphere single - not ripped, the folder named after the box: one album, never four
+        # rows each "disc k of 5")
+        # (the disc ID look-up's stub titles each release by its ID: "mb-set")
+        top = self._series("Band Q - mb-set (2012)")
+        on = {k: [("mb-set", k, 4)] for k in range(1, 4)}
+        _eng, plan = self.plan_of(DiscIdHttp(on, mb=[the_set("mb-set", n=4)]), top)
+        self.assertEqual(len(plan["albums"]), 1, [a.get("status") for a in plan["albums"]])
+        a = plan["albums"][0]
+        self.assertEqual((a["identification"]["release_id"], len(a["files"])), ("mb-set", 9))
+        discs = {(Path(f["src"]).parent.name[:7], (f.get("changes") or {}).get("discnumber", ["1"])[0],
+                  (f.get("changes") or {}).get("totaldiscs", ["?"])[0]) for f in a["files"]}
+        self.assertEqual(discs, {(f"BQ 930{k}", str(k), "4") for k in range(1, 4)})
+
+    def test_DSC14c_a_box_of_years_is_named_by_its_catalogue_number(self):
+        # ("1977-1980 (COCY 93 29-32)" names MusicBrainz's "1977–1980" by the catalogue numbers its
+        # own entry lists - the disc ID answer carries no label info; a bare range of years does not)
+        self.assertTrue(engine._names_release("1977-1980 (COCY 93 29-32)", "1977\u20131980", "1991", "Factory",
+                                              ("4988001176473", "COCY-9329", "COCY-9332")))
+        self.assertFalse(engine._names_release("1977-1980 (COCY 93 29-32)", "1977\u20131980", "1991", "Factory",
+                                               ("4988001176473",)))
+        self.assertFalse(engine._names_release("Joy Division - Rips 1977-1980", "1977\u20131980", "1991", "",
+                                               ("COCY-9329",)))
+
+    def test_DSC14c_standalone_albums_whose_discs_are_on_a_box_stay_apart(self):
+        # (review: "CD rips 2019" of three albums each "1 of 1", their disc IDs on a 4-disc box only,
+        # their own one-disc releases fitting but carrying no disc IDs: the folder's name names no box
+        # and says no set - the albums they are, never the box)
+        top = self._series("CD rips 2019")
+        on = {k: [("mb-set", k, 4)] for k in range(1, 4)}
+        solos = []
+        for k, t in enumerate(("Alpha", "Beta", "Gamma"), 1):
+            r = te.mb_release(f"mb-solo{k}", "Band Q", t)
+            r["media"] = [{"format": "CD", "position": 1, "tracks": [
+                {"id": f"s{k}-t{i}", "position": i + 1, "title": f"D{k}-{i}", "length": ms,
+                 "recording": {"id": f"s{k}-r{i}", "title": f"D{k}-{i}"}} for i, ms in enumerate(te.LENS)]}]
+            solos.append(r)
+        _eng, plan = self.plan_of(DiscIdHttp(on, mb=[the_set("mb-set", n=4)] + solos), top)
+        self.assertEqual(len(plan["albums"]), 3, [a["identification"].get("release_id") for a in plan["albums"]])
+        self.assertNotIn("mb-set", {a["identification"].get("release_id") for a in plan["albums"]
+                                    if a.get("status") == "ready"})
+
+    def test_DSC14c_a_release_of_exactly_n_discs_comes_before_a_bigger_one(self):
+        # (review: disc IDs on a 3-disc release and on a 5-disc box at places 1 to 3: DSC-14 as before,
+        # the 3-disc release - never "2 pressings of one set")
+        top = sessions(self.lib, n=3)
+        on = {k: [("mb-set3", k, 3), ("mb-box5", k, 5)] for k in range(1, 4)}
+        _eng, plan = self.plan_of(DiscIdHttp(on, mb=[the_set("mb-set3", n=3), the_set("mb-box5", n=5)]), top)
+        self.assertEqual({a["identification"].get("release_id") for a in plan["albums"]}, {"mb-set3"})
+        self.assertFalse(any("pressings of one set" in x for a in plan["albums"] for x in a.get("notes") or []))
+
+    def test_DSC14c_discs_not_from_one_up_keep_each_alone(self):
+        # (discs 2 to 4 of a 4-disc release: not 1 to n in the folders' order)
+        top = sessions(self.lib, n=3)
+        on = {k: [("mb-set", k + 1, 4)] for k in range(1, 4)}
+        _eng, plan = self.plan_of(DiscIdHttp(on, mb=[the_set("mb-set", n=4)]), top)
         self.assertEqual(len(plan["albums"]), 3)
 
     def test_DSC14_a_disc_at_another_place_keeps_each_alone(self):

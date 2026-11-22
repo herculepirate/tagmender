@@ -1732,6 +1732,8 @@ class _Scan:
 #     album beside its "(Deluxe Edition)" folder (match_albums.deluxe_named): read together;
 #   - two or more sub-folders whose names begin with a number, with no tracks in P (DSC-10: a
 #     set by its release needs every audio folder of P - not bounded: P is one piece).
+#   - 2 to 40 sub-folders each holding a rip log, with no tracks in P (DSC-14: a set by its discs'
+#     IDs, whatever the folders' names - "COCY 9329 unknown pleasures": P is one piece).
 # Every other sub-folder is a piece of its own, read the same way in turn; its albums are the
 # whole scan's, and come out as soon as no piece read later can hold an album before them.
 _CORE = "\0core"
@@ -1922,6 +1924,31 @@ def _one_release_units(eng, sc, d: Path, names) -> list:
     return out
 
 
+_CAT_SERIES = re.compile(r"([A-Za-z]{2,6})[ -]?\d{3,6}(?:\b|_)")
+
+
+def _rip_logged_kids(d: Path, kids) -> bool:
+    """PRF-3 / DSC-14: 2 to SET_DISCID_MAX_DISCS sub-folders of D, all named by one catalogue
+    series first ("COCY 9329 unknown pleasures" .. "COCY 9332 substance"), each holding a rip log
+    of its own - discs a disc-ID look-up may join - so D is read as one piece. Only the names are
+    listed, no log read."""
+    if not 2 <= len(kids) <= SET_DISCID_MAX_DISCS:
+        return False
+    # (only folders named by one catalogue series, "COCY 9329 ..", "COCY 9330 ..": the names first,
+    # so an artist's folder of albums is never listed here)
+    series = {m[1].upper() if m else None for m in (_CAT_SERIES.match(c) for c in kids)}
+    if len(series) != 1 or None in series:
+        return False
+    for c in kids:
+        try:
+            names = os.listdir(os.path.join(d, c))
+        except OSError:
+            return False
+        if not any(n.lower().endswith(".log") for n in names):
+            return False
+    return True
+
+
 def _plan_folder(eng, path, sc, d: Path, got):
     """PRF-3: how folder D (its listing GOT) is read. None: as one piece with everything below
     it. Else (its core's albums, its core sub-folders, [(first sub-folder, [the sub-folders read
@@ -1932,6 +1959,8 @@ def _plan_folder(eng, path, sc, d: Path, got):
         return None
     if not audio and sum(1 for c in kids if _LEAD_NUMBER.match(c)) >= 2:
         return None                                  # (DSC-10 may join them: not bounded)
+    if not audio and _rip_logged_kids(d, kids):
+        return None                                  # (DSC-14 may join them by their disc IDs)
     up = {c: c for c in kids}
     up[_CORE] = _CORE
 
@@ -2782,11 +2811,14 @@ class Engine:
         # (DSC-11: a release you chose for the joined row - kept under its first folder - is each
         # covered folder's own choice: each planned alone with it, then joined as usual)
         chosen = set() if albums else self._chosen_join(folder, parts)
+        part_of = set()
         if not albums and not chosen:
             # DSC-14: the discs' own IDs first - one release (or several pressings of one set)
             # holding every folder's disc at its place joins them, before any is planned alone
             got = self._disc_id_set(folder, parts)
-            if got is not None:
+            if got is not None and "part_of" in got:
+                part_of = got["part_of"]                 # DSC-14c: planned alone, then joined
+            elif got is not None:
                 return got
         was_force = getattr(self, "force", None)
         if albums:
@@ -2822,6 +2854,10 @@ class Engine:
             if any(self._choice_for(part, alone(part)) for _i, part, _ps in per):
                 return out                               # (a release you chose for one of them)
             if g.set_shape == "discids":
+                if part_of:
+                    got = self._release_folders(folder, parts, per, out, only=part_of)   # DSC-14c
+                    if got.get("joined"):
+                        return got
                 return self._alone_discs(parts, out)     # (DSC-14: by their disc IDs only - none joined them)
             got = self._claim(folder, parts, per)
             if got is None and g.set_shape == "discs" and len(per) == len(parts):
@@ -2877,6 +2913,23 @@ class Engine:
                     "; ".join(str((i.get("label") or {}).get("name") or "") for i in r.get("label-info") or ()),
                     tuple(x for x in [r.get("barcode")] + [i.get("catalog-number") for i in r.get("label-info") or ()] if x))
         return out
+
+    def _release_info(self, rid) -> tuple:
+        """(year, labels, codes) of MusicBrainz release RID for _names_release: the disc ID look-up's,
+        with the catalogue numbers of the release's own entry added (the disc ID answer carries no
+        label info; the entry is the one the match itself reads, cached) - "1977-1980 (COCY 93
+        29-32)" names the "1977–1980" box by its catalogue number COCY-9329->32."""
+        year, labels, codes = getattr(self, "_disc_id_info", {}).get(rid, ("", "", ()))
+        try:
+            det = self.http.get_json(f"https://musicbrainz.org/ws/2/release/{rid}"
+                                     f"?inc=recordings+artist-credits+labels+url-rels+release-groups&fmt=json", "mb")
+        except Exception:
+            det = None
+        info = (det or {}).get("label-info") or ()
+        labels = labels or "; ".join(str((i.get("label") or {}).get("name") or "") for i in info)
+        codes = tuple(dict.fromkeys(list(codes) + [i.get("catalog-number") for i in info if i.get("catalog-number")]
+                                    + ([det.get("barcode")] if det and det.get("barcode") else [])))
+        return year or str((det or {}).get("date") or "")[:4], labels, codes
 
     def _named_box(self, folder: Path, order, per, parts=()) -> list:
         """DSC-14b: the box the folder's own name names, proven by the disc IDs it has: FOLDER's
@@ -3086,12 +3139,21 @@ class Engine:
             per[d] = rels or {}
             common = set(per[d]) if common is None else common & set(per[d])
         n = len(order)
-        fits = sorted(r for r in common or ()
-                      if per[order[0]][r][1] == n and all(i in per[d][r][0] for i, d in enumerate(order, 1)))
-        named_box = False
+        at_place = [r for r in common or () if all(i in per[d][r][0] for i, d in enumerate(order, 1))]
+        fits = sorted(r for r in at_place if per[order[0]][r][1] == n)
+        named_box = part_of = False
         if not fits:
             fits = self._named_box(folder, order, per, parts)  # DSC-14b
             named_box = bool(fits)
+        if not fits:
+            # DSC-14c: the folders discs 1 to n of a release of more - its later discs not ripped,
+            # as DSC-12 has one disc - only where the folder's name names that release or says a set
+            # (as _alone_discs keeps a box), never standalone albums whose discs were also boxed
+            titles_ = getattr(self, "_disc_id_titles", {})
+            info_ = getattr(self, "_disc_id_info", {})
+            fits = sorted(r for r in at_place if per[order[0]][r][1] > n and (
+                says_box(folder.name) or _names_release(folder.name, titles_.get(r, ""), *self._release_info(r))))
+            part_of = bool(fits)
         if not fits:
             return None                                  # (no release holds them all)
         titles = getattr(self, "_disc_id_titles", {})
@@ -3108,6 +3170,12 @@ class Engine:
         if self._named_artist(folder, parts) and not any(
                 _names_release(folder.name, titles.get(r, ""), *info.get(r, ("", "", ())), discs=n) for r in fits):
             return None                                  # (an artist's folder: only one named as the set)
+        if part_of:
+            # (DSC-14c: discs 1 to n of a release of more - the folders' own albums' titles name no
+            # such set, so a search of them joined finds nothing: each folder is planned alone, as its
+            # disc ID proves it, and those matched for sure to that release are joined (DSC-11's join)
+            self.log.info("%s: discs 1 to %d of %s: each planned alone, then joined", folder, n, ", ".join(fits))
+            return {"part_of": set(fits)}
         files = [f for d in order for q in parts for f in q.files if Path(f).parent == d]
         joined = Group(folder, files, [])
         was = (getattr(self, "_in_set", False), getattr(self, "_alone", True))
@@ -3780,7 +3848,7 @@ class Engine:
         who = {w.casefold() for _r, w in rips if w}
         return len(res) > 1 or len(who) > 1
 
-    def _release_folders(self, folder: Path, parts, per, out) -> dict:
+    def _release_folders(self, folder: Path, parts, per, out, only=None) -> dict:
         """DSC-11: album folders side by side (_one_release_groups), each planned alone first, as
         before. Those each matched for sure on their own evidence (_sure: exact at the auto
         threshold - never album known, a TIE-1 suggestion nor a pressing picked by country
@@ -3805,6 +3873,8 @@ class Engine:
                 continue
             if self._release_of(p) is None:
                 continue
+            if only is not None and self._release_of(p)[1] not in only:
+                continue                                 # (DSC-14c: only the release the disc IDs prove)
             sure.append((i, part, p))
         kinds = []                                       # [(release key, its candidate or None, [(i, part, p)])]
         for i, part, p in sure:
